@@ -1,0 +1,201 @@
+"""
+FastAPI application entry point (CLAUDE.md §10, ADR-001).
+
+Lifespan: opens and closes the shared asyncpg pool (database.py).
+Routers: auth / insights / signals / journeys included with their approved prefixes.
+Inline /api/ routes that span domains (stable n8n contract — CLAUDE.md §10, §13):
+  GET  /api/clients/active-list                  — admin query for n8n ingestion loops
+  GET  /api/clients/with-competitive-monitoring  — clients with CompSig enabled (n8n)
+  GET  /api/dashboard/summary                    — aggregated KPIs for the authenticated client (< 300ms)
+  POST /api/reports/generate                     — stub; Phase 6 wires PDF + S3
+  POST /webhook/churn-alert                      — churn webhook entry (n8n side); Phase 6
+"""
+
+from __future__ import annotations
+
+from contextlib import asynccontextmanager
+from typing import Any
+
+from hmac import compare_digest
+
+from fastapi import Depends, FastAPI, Header, HTTPException, status
+from fastapi.middleware.cors import CORSMiddleware
+
+import app.database as _db
+from app.config import settings
+from app.database import acquire_for_client, close_pool, init_pool
+from app.routers import auth, insights, journeys, signals
+from app.routers.auth import CurrentUser, get_current_user
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await init_pool()
+    yield
+    await close_pool()
+
+
+app = FastAPI(
+    title="DataAutomated.io API",
+    version="1.0.0",
+    lifespan=lifespan,
+)
+
+# CORS — allow only the approved origins (CLAUDE.md §10).
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# ---- Routers (CLAUDE.md §10 prefixes / tags) ----
+app.include_router(auth.router)         # /auth   — Authentication
+app.include_router(insights.router)     # /insights — VoC Insights
+app.include_router(insights._extra)     # /stream/insights, /api/agents/voc/run, /api/ingest/trigger
+app.include_router(signals.router)      # /signals  — Competitive Signals
+app.include_router(signals._extra)      # /api/agents/competitive-signal/run
+app.include_router(journeys.router)     # /journeys — Journey Analytics
+
+
+# ---- Internal auth ----
+
+async def require_n8n_webhook_secret(
+    x_n8n_webhook_secret: str | None = Header(default=None),
+) -> None:
+    """
+    Protect internal n8n/server-to-server endpoints.
+
+    CLAUDE.md §13 requires webhook auth via N8N_WEBHOOK_SECRET.  These routes
+    expose cross-client operational data, so they must not be anonymously
+    reachable even in the Phase 3 stub implementation.
+    """
+    expected = settings.n8n_webhook_secret
+    if not expected or x_n8n_webhook_secret is None or not compare_digest(
+        x_n8n_webhook_secret,
+        expected,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Unauthorized.",
+        )
+
+
+# ---- Health ----
+
+@app.get("/health", tags=["Health"])
+async def health() -> dict:
+    """Liveness probe used by docker-compose / ECS health checks."""
+    return {"status": "ok", "service": "backend", "version": app.version}
+
+
+@app.get("/", tags=["Health"])
+async def root() -> dict:
+    return {"name": "DataAutomated.io API", "version": app.version}
+
+
+# ---- Inline /api/ routes — stable n8n contract (CLAUDE.md §13) ----
+
+@app.get("/api/clients/active-list", tags=["Internal"])
+async def active_clients(_internal_auth: None = Depends(require_n8n_webhook_secret)):
+    """
+    Returns all active clients.  Used by n8n ingestion workflows to loop over
+    clients.  Admin-level query — no tenant context; runs as pool's login role.
+    Requires X-N8N-Webhook-Secret.  This route returns cross-client operational
+    data for n8n ingestion loops and must never be publicly readable.
+    """
+    if _db.pool is None:
+        return {"clients": []}
+    async with _db.pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT id, name, email, plan FROM clients WHERE is_active = TRUE"
+        )
+    return {
+        "clients": [
+            {k: str(v) if v is not None else None for k, v in dict(r).items()}
+            for r in rows
+        ]
+    }
+
+
+@app.get("/api/clients/with-competitive-monitoring", tags=["Internal"])
+async def clients_with_competitive_monitoring(
+    _internal_auth: None = Depends(require_n8n_webhook_secret),
+):
+    """
+    Returns active clients that have competitive monitoring enabled.
+    Used by the n8n Competitive Signal Monitor workflow to loop over targets.
+    Requires X-N8N-Webhook-Secret.  Phase 5 narrows this to clients with
+    competitive sources connected.
+    Phase 5: filter by data_sources where source_type includes competitive sources.
+    """
+    if _db.pool is None:
+        return {"clients": []}
+    async with _db.pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT id, name, plan FROM clients WHERE is_active = TRUE"
+        )
+    return {
+        "clients": [
+            {"id": str(r["id"]), "name": r["name"], "plan": r["plan"]}
+            for r in rows
+        ]
+    }
+
+
+@app.post("/api/reports/generate", status_code=202, tags=["Internal"])
+async def generate_report(current_user: CurrentUser = Depends(get_current_user)):
+    """
+    Trigger report generation for the authenticated client.
+    Stub — Phase 6 wires PDF generation (WeasyPrint) + S3 upload and returns an s3_key.
+    """
+    return {"status": "report_queued", "s3_key": None}
+
+
+@app.post("/webhook/churn-alert", status_code=202, tags=["Internal"])
+async def churn_alert_webhook(
+    payload: dict[str, Any],
+    _internal_auth: None = Depends(require_n8n_webhook_secret),
+):
+    """
+    Churn alert entry point called by the VoC agent when churn_risk > 0.15.
+    The n8n Churn Alert workflow is triggered here; it routes to Slack/Resend based on
+    urgency (> 0.25 = URGENT; > 0.15 = standard early warning).
+    Stub — Phase 6 wires n8n webhook dispatch. Requires X-N8N-Webhook-Secret.
+    """
+    return {"status": "received"}
+
+
+@app.get("/api/dashboard/summary", tags=["Internal"])
+async def dashboard_summary(current_user: CurrentUser = Depends(get_current_user)):
+    """
+    Aggregated KPI summary for the authenticated client's dashboard (< 300ms target).
+    Returns: latest sentiment score, churn risk, unread signal count, and latest
+    journey drop-off rate.  Uses acquire_for_client for full RLS + WHERE isolation.
+    """
+    async with acquire_for_client(current_user.client_id) as conn:
+        insight = await conn.fetchrow(
+            "SELECT sentiment_score, churn_risk, created_at "
+            "FROM feedback_insights "
+            "WHERE client_id = $1 ORDER BY created_at DESC LIMIT 1",
+            current_user.client_id,
+        )
+        unread_signals = await conn.fetchval(
+            "SELECT COUNT(*) FROM competitive_signals "
+            "WHERE client_id = $1 AND is_read = FALSE",
+            current_user.client_id,
+        )
+        journey = await conn.fetchrow(
+            "SELECT funnel_step, drop_off_rate FROM journey_insights "
+            "WHERE client_id = $1 ORDER BY created_at DESC LIMIT 1",
+            current_user.client_id,
+        )
+
+    return {
+        "sentiment_score": insight["sentiment_score"] if insight else None,
+        "churn_risk": insight["churn_risk"] if insight else None,
+        "unread_signals": unread_signals,
+        "latest_funnel_step": journey["funnel_step"] if journey else None,
+        "latest_drop_off_rate": journey["drop_off_rate"] if journey else None,
+    }

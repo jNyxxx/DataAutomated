@@ -1,0 +1,15 @@
+{
+  "name": "dataautomated-repo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Root tooling for DataAutomated.io — commit linting & git hooks only. Application code lives in backend/ and frontend/.",
+  "scripts": {
+    "prepare": "husky",
+    "commitlint": "commitlint --edit"
+  },
+  "devDependencies": {
+    "@commitlint/cli": "^19.0.0",
+    "@commitlint/config-conventional": "^19.0.0",
+    "husky": "^9.1.0"
+  }
+}

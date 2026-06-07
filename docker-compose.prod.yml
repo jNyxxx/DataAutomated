@@ -1,0 +1,36 @@
+# DataAutomated.io — production overrides (CLAUDE.md §15)
+# Usage: docker compose -f docker-compose.yml -f docker-compose.prod.yml up
+#
+# In real production the services run on AWS ECS Fargate (ADR-008): the backend
+# autoscales 2->10 behind an ALB, the frontend behind CloudFront, the database is
+# RDS (pg16 + pgvector), and n8n is a single task with persistent EFS storage.
+# This file documents the production-shaped overrides for image-based, no-reload runs.
+
+services:
+  db:
+    # In production the database is AWS RDS, NOT a container. This stanza is only
+    # for staging/parity runs; production deployments point DATABASE_* at RDS.
+    restart: unless-stopped
+    ports: []   # do not expose Postgres publicly
+
+  backend:
+    # Production runs prebuilt images from ECR (no local source mount, no --reload).
+    build: !reset null
+    image: ${ECR_BACKEND_IMAGE:-dataautomated/backend:latest}
+    volumes: []
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
+    restart: unless-stopped
+    environment:
+      # Secrets are injected from AWS Secrets Manager in real deploys (SR-03).
+      ENV: production
+
+  frontend:
+    build: !reset null
+    image: ${ECR_FRONTEND_IMAGE:-dataautomated/frontend:latest}
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+
+  n8n:
+    # Single instance + persistent storage (RISK-11 stateful exception, ADR-008).
+    restart: unless-stopped

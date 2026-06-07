@@ -1,0 +1,86 @@
+# DataAutomated.io — CI skeleton (MASTER_ROADMAP §5.3 P1 deliverable; OR-06/OR-07).
+# Gates PRs to main on: conventional commits, backend tests, frontend build.
+# Jobs expand phase-by-phase (e.g. RLS/isolation tests land with P2/P3).
+
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  commitlint:
+    name: Commit message lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install
+      - name: Lint PR commits
+        if: github.event_name == 'pull_request'
+        run: npx commitlint --from "${{ github.event.pull_request.base.sha }}" --to "${{ github.event.pull_request.head.sha }}" --verbose
+
+  backend-tests:
+    name: Backend tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: dataautomated
+          POSTGRES_PASSWORD: change_me_locally
+          POSTGRES_DB: dataautomated
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U dataautomated -d dataautomated"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql+asyncpg://dataautomated:change_me_locally@localhost:5432/dataautomated
+      DATABASE_DSN: postgresql://dataautomated:change_me_locally@localhost:5432/dataautomated
+      TEST_DATABASE_DSN: postgresql://dataautomated:change_me_locally@localhost:5432/dataautomated
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements.txt
+      - name: Apply migrations
+        run: |
+          python - <<'PY'
+          import os
+          import sys
+
+          cwd = os.getcwd()
+          sys.path = [p for p in sys.path if p not in ("", cwd)]
+
+          from alembic.config import main
+
+          main(["upgrade", "head"])
+          PY
+      - run: pytest -q
+
+  frontend-build:
+    name: Frontend build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install
+      - run: npm run build
