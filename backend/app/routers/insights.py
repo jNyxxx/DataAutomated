@@ -23,6 +23,7 @@ from uuid import UUID
 from fastapi import APIRouter, BackgroundTasks, Depends
 from fastapi.responses import StreamingResponse
 
+from app.config import settings
 from app.database import acquire_for_client
 from app.routers.auth import CurrentUser, get_current_user
 
@@ -36,12 +37,19 @@ _extra = APIRouter(tags=["VoC Insights"])
 
 
 # ---------------------------------------------------------------------------
-# Background stub — Phase 4 replaces this with the real VoC LangGraph agent
+# Background dispatch — wires to the real VoC LangGraph agent (Phase 4a)
 # ---------------------------------------------------------------------------
 
 async def _run_voc_analysis(client_id: UUID) -> None:
-    """Placeholder dispatched by /insights/analyze.  Phase 4 wires voc_agent here."""
-    pass
+    """Dispatch the VoC LangGraph agent. Background tasks must not propagate exceptions."""
+    if not settings.openai_api_key:
+        logger.warning("OPENAI_API_KEY not configured; VoC agent skipped for client %s", client_id)
+        return
+    try:
+        from app.agents.voc_agent import run_voc_analysis
+        await run_voc_analysis(client_id)
+    except Exception:
+        logger.exception("VoC agent run failed for client %s", client_id)
 
 
 # ---------------------------------------------------------------------------
