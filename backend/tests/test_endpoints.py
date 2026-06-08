@@ -189,6 +189,54 @@ async def test_journeys_analyze_returns_202_immediately(bearer_token):
 
 
 # ---------------------------------------------------------------------------
+# /auth/me (P3 endpoint — returns the authenticated user's profile)
+# ---------------------------------------------------------------------------
+
+async def test_me_returns_profile(bearer_token):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        resp = await ac.get("/auth/me", headers={"Authorization": f"Bearer {bearer_token}"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert set(body.keys()) == {"id", "client_id", "role"}
+    assert body["role"] == "viewer"
+
+
+async def test_me_requires_auth():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        resp = await ac.get("/auth/me")
+    assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# n8n agent-run aliases (P3/P4 — same dispatch as primary /analyze routes)
+# ---------------------------------------------------------------------------
+
+async def test_n8n_voc_run_alias_returns_202(bearer_token):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        resp = await ac.post(
+            "/api/agents/voc/run", headers={"Authorization": f"Bearer {bearer_token}"}
+        )
+    assert resp.status_code == 202
+    assert resp.json()["status"] == "analysis_queued"
+
+
+async def test_n8n_competitive_signal_run_alias_returns_202(bearer_token):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        resp = await ac.post(
+            "/api/agents/competitive-signal/run",
+            headers={"Authorization": f"Bearer {bearer_token}"},
+        )
+    assert resp.status_code == 202
+    assert resp.json()["status"] == "analysis_queued"
+
+
+async def test_n8n_voc_run_alias_requires_auth():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        resp = await ac.post("/api/agents/voc/run")
+    assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
 # Dashboard summary (< 300ms)
 # ---------------------------------------------------------------------------
 

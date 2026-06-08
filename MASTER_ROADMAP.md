@@ -6,8 +6,11 @@
 > Guide for Junex.
 > **Contains all five PHASE-0 deliverables:** §1 Requirements Traceability Matrix · §2 Architecture
 > Audit · §3 Risk Assessment · §4 Dependency Graph · §5 Roadmap & Execution Strategy.
-> **Status:** Draft for approval. After approval, implementation phases begin **one at a time**, each
-> gated by the entry/exit criteria in §5.
+> **Status (updated 2026-06-08):** Roadmap approved; execution under way, one phase at a time.
+> **Phases 0–3 ✓ COMPLETE.** **Phase 4 ◧ CODE-COMPLETE** (all three LangGraph agents implemented,
+> wired, 148 tests green) but **NOT yet operationally verified** — no live LangSmith traces captured,
+> and CompSig persists no real signals until P5 MCP tools exist. **Phases 5–10 ▢ NOT STARTED.**
+> Per-phase markers in §5 reflect actual repository state.
 > **Version:** 1.0 | June 2026 | Confidential — Engineering Use Only
 
 ---
@@ -315,7 +318,7 @@ needs to exist). "Hard" = blocking; "soft" = can start in parallel but completes
 - **Timeline anchor:** the Build Guide's 35-day map is the reference cadence; days are indicative,
   gates are authoritative.
 
-### 5.2 PHASE 0 — Planning & Decisions (this document)
+### 5.2 PHASE 0 — Planning & Decisions (this document) — ✓ COMPLETE
 - **Objective:** produce this package; resolve the "resolve-now" decisions so P1–P3 are unblocked.
 - **Deliverables:** §1–§5 of this file.
 - **Decisions required to exit P0 (owner: maintainer):**
@@ -330,7 +333,7 @@ needs to exist). "Hard" = blocking; "soft" = can start in parallel but completes
   - **D6 (AUD-09/RISK-14):** Confirm MVP = LLM-based depth; v1.1 ML depth explicitly deferred.
 - **Exit criteria:** roadmap approved; D1–D6 ruled (or explicitly deferred with risk accepted).
 
-### 5.3 PHASE 1 — Project Setup & Repository Structure  *(ref Day 1–2)*
+### 5.3 PHASE 1 — Project Setup & Repository Structure  *(ref Day 1–2)* — ✓ COMPLETE
 - **Entry:** P0 approved.
 - **Deliverables:** approved folder structure (CLAUDE §4); local Docker dev env; `.env.example`;
   git discipline (branch protection, commit lint); CI skeleton.
@@ -339,7 +342,7 @@ needs to exist). "Hard" = blocking; "soft" = can start in parallel but completes
 - **Exit / Done-When:** `docker-compose up` starts all service stubs; repo matches CLAUDE §4 exactly;
   no secrets in VCS.
 
-### 5.4 PHASE 2 — Database & Multi-Tenancy Foundation  *(ref Day 2–4)*
+### 5.4 PHASE 2 — Database & Multi-Tenancy Foundation  *(ref Day 2–4)* — ✓ COMPLETE
 - **Entry:** P1 done; D2, D3, D4 ruled.
 - **Deliverables:** full canonical schema (DR-01/02), extensions (DR-03), RLS enabled + policies on
   tenant tables (NFR-01), encryption-at-app-layer design for credentials (SR-04/DR-04), migration
@@ -349,7 +352,7 @@ needs to exist). "Hard" = blocking; "soft" = can start in parallel but completes
 - **Exit / Done-When:** every table queryable and matches spec; a cross-tenant query under RLS
   returns ∅; migration up/down works; schema review signs off (no renames vs spec).
 
-### 5.5 PHASE 3 — FastAPI Backend, Auth, Pool & Tenant Context  *(ref Day 4–8)*
+### 5.5 PHASE 3 — FastAPI Backend, Auth, Pool & Tenant Context  *(ref Day 4–8)* — ✓ COMPLETE
 - **Entry:** P2 done; D1 (auth) ruled.
 - **Deliverables:** async FastAPI app + routers (CLAUDE §10); JWT auth + bcrypt (SR-01); middleware
   sets `app.current_client_id` (SR-02); **shared asyncpg pool + mandatory tenant-context-on-checkout
@@ -362,7 +365,13 @@ needs to exist). "Hard" = blocking; "soft" = can start in parallel but completes
   **isolation test proves a pooled/background connection cannot read another tenant's rows**;
   AUD-02 DSN handling resolved.
 
-### 5.6 PHASE 4 — LangGraph Agents  *(ref Day 8–18)* — sub-phased
+### 5.6 PHASE 4 — LangGraph Agents  *(ref Day 8–18)* — sub-phased — ◧ CODE-COMPLETE (not operationally verified)
+- **Status (2026-06-08):** All three agents (P4a VoC, P4b CompSig, P4c Journey) are implemented as
+  `@traceable` LangGraph `StateGraph`s, wired to their routers, with 148 passing tests (unit + E2E
+  mocked-LLM + tenant-isolation + no-key fail-safe). **Not yet operationally verified:** no live
+  LangSmith traces captured (keys now in `.env`), perf targets unmeasured against real data, and
+  `comp_signal_agent.mine_signals` is a deliberate **P5 stub** (returns `[]`) — CompSig persists no
+  real signals until P5 MCP tools land. P4 flips to ✓ COMPLETE once live traces + perf are verified.
 - **Entry:** P3 done (pool + tenant context mandatory).
 - **P4a VoC Agent:** graph (fetch→nlp→cluster→narrative→check_alert→store); LangSmith tracing
   (NFR-03); per-node unit tests; prompt-injection hardening (AUD-11/RISK-05).

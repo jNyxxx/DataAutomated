@@ -4,6 +4,12 @@ Journey Analytics router (CLAUDE.md §10; prefix `/journeys`, tag `Journey Analy
 Routes:
   POST /journeys/analyze    — dispatch Journey agent (async)
   GET  /journeys/latest     — latest journey_insights rows for the caller's client
+
+Note: unlike insights.py and signals.py, this router intentionally exposes NO `/api/agents/*/run`
+n8n alias. CLAUDE.md §13 defines no scheduled n8n workflow for journey analysis (the four
+workflows cover ingestion, competitive monitor, weekly report, and churn webhook), so adding a
+journey trigger endpoint would be surface area with no consumer. Add one here if/when a §13
+journey workflow is introduced.
 """
 
 from __future__ import annotations

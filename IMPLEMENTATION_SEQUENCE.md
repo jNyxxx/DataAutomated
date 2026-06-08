@@ -84,33 +84,38 @@ This blueprint **commits to the recommended default for each** (flagged in the o
 
 ## 5. Per-phase execution gates
 
-### P1 — Project Setup & Repository Structure *(ref Day 1–2)*
+> **Progress snapshot (2026-06-08).** P0–P3 **✓ DONE** · P4 **◧ CODE-COMPLETE** (148 tests green; *not yet operationally verified* — no live LangSmith traces captured, and CompSig persists no real signals until P5 MCP tools exist) · P5–P10 **▢ NOT STARTED**. The markers below reflect actual repository state, not plan intent. Exit criteria that require live operation (LangSmith traces, perf-under-load) are noted as pending where applicable.
+
+### P1 — Project Setup & Repository Structure *(ref Day 1–2)* — ✓ DONE
 - **Entry:** P0 approved.
 - **Governing docs:** PROJECT_STRUCTURE, INFRASTRUCTURE (local).
 - **Deliverables:** approved folder structure (CLAUDE §4); local Docker dev env; `.env.example`; git discipline (branch protection, commit lint); CI skeleton. *Satisfies* OR-01, OR-06, SR-03.
 - **Exit / Done-When:** `docker-compose up` starts all service stubs; repo matches CLAUDE §4 exactly; no secrets in VCS.
 
-### P2 — Database & Multi-Tenancy Foundation *(ref Day 2–4)*
+### P2 — Database & Multi-Tenancy Foundation *(ref Day 2–4)* — ✓ DONE
 - **Entry:** P1 done; **D2, D3, D4 ruled.**
 - **Governing docs:** DATABASE_FOUNDATION, MULTI_TENANT_SECURITY.
 - **Deliverables:** full canonical schema (DR-01/02), extensions + pgvector index (DR-03), RLS enabled + `client_isolation` policy on tenant tables (NFR-01), app-layer credential-encryption design (SR-04/DR-04), Alembic as schema authority (AUD-04), seed/test data. *Satisfies* DR-01…05, NFR-01, SR-04, SR-06, part SR-02.
 - **Risks retired:** RISK-08; foundation for RISK-01.
 - **Exit / Done-When:** every table queryable & matches spec; **cross-tenant query under RLS returns ∅**; migration up/down works; schema review signs off (no renames).
 
-### P3 — FastAPI Backend, Auth, Pool & Tenant Context *(ref Day 4–8)*
+### P3 — FastAPI Backend, Auth, Pool & Tenant Context *(ref Day 4–8)* — ✓ DONE
 - **Entry:** P2 done; **D1 ruled.**
 - **Governing docs:** BACKEND_ARCHITECTURE, MULTI_TENANT_SECURITY.
 - **Deliverables:** async FastAPI app + routers (CLAUDE §10); JWT auth + bcrypt (SR-01); middleware sets `app.current_client_id` (SR-02); **shared asyncpg pool + mandatory tenant-context-on-checkout helper + isolation test** (AUD-05/08); background-task dispatch (NFR-02); CORS; error handling; audit scaffolding (SR-05); AUD-02 DSN handling. *Satisfies* SR-01/02/05, NFR-02, part NFR-05, the n8n API contract.
 - **Risks retired:** **RISK-01, RISK-02**; part RISK-12.
 - **Exit / Done-When:** `/docs` shows all endpoints; JWT passes; **trigger endpoint < 100ms**; **isolation test proves a pooled/background connection cannot read another tenant's rows**; AUD-02 resolved.
 
-### P4 — LangGraph Agents *(ref Day 8–18; sub-phased)*
+### P4 — LangGraph Agents *(ref Day 8–18; sub-phased)* — ◧ CODE-COMPLETE (not operationally verified)
 - **Entry:** P3 done (pool + tenant context mandatory).
 - **Governing docs:** AGENT_ARCHITECTURE (+ MCP for P4b/c, RAG for node insertion).
 - **P4a VoC:** graph fetch→nlp→cluster→narrative→check_alert→store; LangSmith (NFR-03); per-node unit tests; injection hardening (AUD-11/RISK-05). *Satisfies* FR-VOC-01…05. *Done-When:* VoC traces succeed; insights persisted; `raw_feedback` drains; **run < 60s**.
 - **P4b CompSig:** graph fetch_competitors→mine→classify→context→flag→store; consumes P5 tools. *Satisfies* FR-CSE-01…05. *Done-When:* traces succeed; signals persisted; **run < 45s**.
 - **P4c Journey:** graph fetch_events→funnels→dropoffs→diagnose→recommend→store. *Satisfies* FR-BJI-01…04. *Done-When:* journey insights persisted; traces succeed.
 - **Cross-cutting exit:** all three idempotent & broker-portable (RISK-04); batching/limits enforced (RISK-03); **LangSmith = 3 healthy agents**.
+- **Status (2026-06-08) — CODE-COMPLETE, operationally unverified:**
+  - All three agents implemented as LangGraph `StateGraph`s with the canonical node order above, `@traceable` entry points, `acquire_for_client` + explicit `client_id` on every query, injection-fenced prompts, and defensive output validation. Wired to their routers via the background-dispatch pattern. **148 tests pass** (unit + E2E with mocked LLM + tenant-isolation + no-key fail-safe).
+  - **Remaining to mark P4 fully DONE:** (1) live `OPENAI_API_KEY`/`LANGCHAIN_API_KEY` set so real runs produce **LangSmith traces** (NFR-03 exit criterion) — keys now configured in `.env`, traces not yet captured; (2) perf verification (VoC < 60s / CompSig < 45s) against real data; (3) **P5 dependency**: `comp_signal_agent.mine_signals` is a clean P5 stub returning `[]` — CompSig persists **no real signals until P5 MCP tools exist**. Journey runs on existing `journey_events`; VoC runs on existing `raw_feedback`.
 
 ### P5 — MCP Tool Layer *(ref Day 12–16, parallel with P4)*
 - **Entry:** P2 (`data_sources` + encryption); **D5 scraping policy ruled.**

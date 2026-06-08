@@ -48,6 +48,12 @@ pgdata/
 
 # ---- Local engineering artifacts (not part of the §4 source tree) ----
 output/
+# Untracked planning/scratch — keep commits clean. NOTE: scoped patterns only; the project's
+# tracked .md docs (README, CLAUDE, MASTER_ROADMAP, architecture docs, …) are intentionally NOT ignored.
+SKILL_INSTALLATION_PLAN.md
+*.local.md          # local-only markdown notes (e.g. scratch.local.md)
+*.plan              # planning scratch
+.claude/            # local Claude Code session/plan state, if any lands inside the repo
 
 # ---- Editor / OS ----
 .idea/
