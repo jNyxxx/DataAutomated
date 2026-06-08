@@ -14,6 +14,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, BackgroundTasks, Depends
 
+from app.config import settings
 from app.database import acquire_for_client
 from app.routers.auth import CurrentUser, get_current_user
 
@@ -24,8 +25,15 @@ _extra = APIRouter(tags=["Competitive Signals"])
 
 
 async def _run_comp_signal_analysis(client_id: UUID) -> None:
-    """Placeholder — Phase 4 wires comp_signal_agent here."""
-    pass
+    """Dispatch the Competitive Signal LangGraph agent. Background tasks must not propagate exceptions."""
+    if not settings.openai_api_key:
+        logger.warning("OPENAI_API_KEY not configured; CompSig agent skipped for client %s", client_id)
+        return
+    try:
+        from app.agents.comp_signal_agent import run_comp_signal_analysis
+        await run_comp_signal_analysis(client_id)
+    except Exception:
+        logger.exception("CompSig agent run failed for client %s", client_id)
 
 
 async def _dispatch_comp_signal(

@@ -13,6 +13,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, BackgroundTasks, Depends
 
+from app.config import settings
 from app.database import acquire_for_client
 from app.routers.auth import CurrentUser, get_current_user
 
@@ -22,8 +23,15 @@ router = APIRouter(prefix="/journeys", tags=["Journey Analytics"])
 
 
 async def _run_journey_analysis(client_id: UUID) -> None:
-    """Placeholder — Phase 4 wires journey_agent here."""
-    pass
+    """Dispatch the Journey LangGraph agent. Background tasks must not propagate exceptions."""
+    if not settings.openai_api_key:
+        logger.warning("OPENAI_API_KEY not configured; Journey agent skipped for client %s", client_id)
+        return
+    try:
+        from app.agents.journey_agent import run_journey_analysis
+        await run_journey_analysis(client_id)
+    except Exception:
+        logger.exception("Journey agent run failed for client %s", client_id)
 
 
 @router.post("/analyze", status_code=202, summary="Trigger Journey analysis (async)")
