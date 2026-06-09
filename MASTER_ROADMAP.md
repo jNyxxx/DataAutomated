@@ -11,9 +11,10 @@
 > wired; 194 tests green) but **NOT yet operationally verified** — no live LangSmith traces captured.
 > **Phase 5 ✓ COMPLETE** (6 MCP tools, registry, tenant isolation, arun seam — 30/30 tool tests
 > pass including 6 DB tenant-isolation tests).
-> **Phase 7 ✓ COMPLETE** (embedding_service.py implemented; rag_context_node wired into VoC graph;
-> 50 global knowledge embeddings seeded via seed_embeddings.py; 11 new tests pass including tenant
-> isolation, result shape, performance <50ms @ 1000 embeddings). **Phases 6, 8–10 ▢ NOT STARTED.**
+> **Phase 7 ◧ CODE-COMPLETE** (embedding_service.py implemented; rag_context_node wired into VoC
+> graph; 11 new tests pass including tenant isolation, result shape, and diverse-vector performance
+> <50ms @ 1000 embeddings). **Remaining:** seed_embeddings.py + live RAG + LangSmith blocked on
+> OpenAI billing quota (`insufficient_quota`). **Phases 6, 8–10 ▢ NOT STARTED.**
 > Per-phase markers in §5 reflect actual repository state.
 > **Version:** 1.0 | June 2026 | Confidential — Engineering Use Only
 
@@ -414,15 +415,19 @@ needs to exist). "Hard" = blocking; "soft" = can start in parallel but completes
 - **Exit / Done-When:** scheduled workflow fires and completes without error; weekly brief email +
   threshold alerts delivered; PDF stored in S3 with working link.
 
-### 5.9 PHASE 7 — RAG Knowledge Base  ✓ COMPLETE *(ref Day 16–20)*
+### 5.9 PHASE 7 — RAG Knowledge Base  ◧ CODE-COMPLETE *(ref Day 16–20)*
 - **Entry:** P2 (pgvector), P4 agents functional. ✓
-- **Deliverables:** central embedding service (single path, OR-05) ✓; seed knowledge (50 global
-  entries via seed_embeddings.py) ✓; `rag_context_node` inserted before narrative_generation ✓;
-  tenant+global retrieval ✓; 11 new tests pass ✓; retrieval <50ms @ 1000 embeddings ✓.
+- **Deliverables:** central embedding service (single path, OR-05) ✓; `rag_context_node` inserted
+  before narrative_generation ✓; tenant+global retrieval ✓; 11 new tests (tenant isolation, result
+  shape, diverse-random-vector performance <50ms @ 1000 embeddings) ✓; 194/194 tests green ✓.
 - **Satisfies:** OR-05 ✓, enriches FR-VOC-05 ✓, FR-CSE-04 (narrative ready for CompSig context).
-- **Risks retired:** baseline for RISK-09 (ivfflat index confirmed performant at 1000 rows).
-- **Exit / Done-When:** VoC narrative references retrieved context ✓; no duplicate RAG path ✓;
-  similarity query returns sensible results ✓; 194/194 tests green ✓.
+- **Risks retired:** baseline for RISK-09 (ivfflat index confirmed performant at 1000 diverse rows).
+- **Remaining blockers — OpenAI billing required:** (1) `seed_embeddings.py` — 53 global entries
+  not yet seeded (`insufficient_quota` on current key); (2) live `retrieve_similar` end-to-end
+  unverified against real vectors; (3) LangSmith traces with rag_context_node not captured.
+  P7 flips to ✓ COMPLETE once billing is funded and seed + live trace are verified.
+- **Exit / Done-When:** seed 50+ global rows; VoC narrative references retrieved context (live
+  LangSmith trace); no duplicate RAG path ✓; 194/194 tests green ✓.
 
 ### 5.10 PHASE 8 — Next.js Client Portal + SSE  *(ref Day 18–28)*
 - **Entry:** P3 API + P4 persisted data.

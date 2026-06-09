@@ -224,7 +224,7 @@ async def test_store_and_retrieve_global_embedding(db_pool, admin_conn, monkeypa
         match = next(r for r in results if r["id"] == str(row_id))
         assert match["client_id"] is None
         assert isinstance(match["similarity_score"], float)
-        assert 0.0 <= match["similarity_score"] <= 1.01  # cosine similarity [0,1] + float tolerance
+        assert -1.0 <= match["similarity_score"] <= 1.01  # cosine similarity in [-1,1]; identical fake vecs → ≈1.0
         assert match["metadata"] == {"source": "test", "category": "churn"}
 
     finally:
@@ -357,12 +357,12 @@ async def test_retrieve_similar_ordered_by_similarity(db_pool, admin_conn, monke
 
     monkeypatch.setattr(svc, "_embeddings", _make_embedding_mock())
 
-    # Insert two global rows: one identical to query vector, one orthogonal
+    # Insert two global rows: one identical to query vector (cosine=1), one antiparallel (cosine=-1)
     identical_vec = "[" + ",".join(["0.01"] * 1536) + "]"
-    orthogonal_vec = "[" + ",".join(["-0.01"] * 1536) + "]"
+    antiparallel_vec = "[" + ",".join(["-0.01"] * 1536) + "]"
 
     ids_to_clean = []
-    for v, label in [(identical_vec, "identical"), (orthogonal_vec, "orthogonal")]:
+    for v, label in [(identical_vec, "identical"), (antiparallel_vec, "antiparallel")]:
         row_id = await admin_conn.fetchval(
             "INSERT INTO knowledge_embeddings (content, embedding) "
             "VALUES ($1, $2::vector) RETURNING id",
@@ -388,17 +388,31 @@ async def test_retrieve_similar_ordered_by_similarity(db_pool, admin_conn, monke
 async def test_retrieval_performance_1000_embeddings(admin_conn):
     """
     Retrieval from 1000 embeddings must complete in < 50ms (CLAUDE.md §16 performance target).
-    Uses PostgreSQL-generated vectors — no OpenAI call required.
+    Uses PostgreSQL-generated random vectors per row — no OpenAI call required.
+    Diverse per-row vectors exercise the ivfflat index under realistic (non-trivial) conditions.
     """
-    # Seed 1000 global rows with identical vectors via a single SQL INSERT
+    import random as _rand
+    _rand.seed(42)
+
+    # Clean up any orphaned rows from a prior failed run
+    await admin_conn.execute(
+        "DELETE FROM knowledge_embeddings WHERE content LIKE 'perf_test_%'"
+    )
+
+    # Seed 1000 global rows with unique random vectors (server-side random() per row)
     await admin_conn.execute(
         "INSERT INTO knowledge_embeddings (content, embedding) "
         "SELECT 'perf_test_' || gs::text, "
-        "('[' || repeat('0.001,', 1535) || '0.001]')::vector "
+        "       CAST('[' || ("
+        "           SELECT string_agg(round(random()::numeric, 6)::text, ',')"
+        "           FROM generate_series(1, 1536)"
+        "       ) || ']' AS vector) "
         "FROM generate_series(1, 1000) AS gs"
     )
 
-    probe_str = "[" + ",".join(["0.001"] * 1536) + "]"
+    # Random probe vector (distinct from stored vectors — exercises the index honestly)
+    probe = [_rand.uniform(-1.0, 1.0) for _ in range(1536)]
+    probe_str = "[" + ",".join(f"{v:.6f}" for v in probe) + "]"
 
     try:
         start = time.perf_counter()
