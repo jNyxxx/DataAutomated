@@ -1,8 +1,8 @@
 """
 Voice-of-Customer LangGraph agent (CLAUDE.md §7.1; AGENT_ARCHITECTURE.md §3.1).
 
-Graph: fetch_feedback -> nlp_analysis -> theme_clustering -> narrative_generation
-       -> check_alert -> store_results -> END
+Graph: fetch_feedback -> nlp_analysis -> theme_clustering -> rag_context
+       -> narrative_generation -> check_alert -> store_results -> END
 
 Tenant contract (CLAUDE §6; MULTI_TENANT_SECURITY §4):
   - All DB access goes through acquire_for_client() — never asyncpg.connect().
@@ -31,6 +31,7 @@ from langsmith import traceable
 
 from app.config import settings
 from app.database import acquire_for_client
+from app.services.embedding_service import retrieve_similar
 from app.services.nlp_service import NLPResult, extract_feedback_batch
 
 logger = logging.getLogger("dataautomated")
@@ -47,6 +48,7 @@ class VoCState(TypedDict):
     sentiment_results: list[dict]  # per-item NLPResult dicts
     theme_clusters: list[dict]     # [{"theme","count","avg_sentiment","churn_signal_rate"}]
     churn_risk_score: float
+    rag_context: list[str]         # retrieved knowledge-base chunks (Phase 7)
     narrative: str
     alert_required: bool
 
@@ -128,8 +130,42 @@ def theme_clustering_node(state: VoCState) -> dict:
     return {"theme_clusters": clusters, "churn_risk_score": churn_risk}
 
 
+async def rag_context_node(state: VoCState) -> dict:
+    """
+    Retrieve relevant knowledge-base chunks before narrative generation (CLAUDE.md §9).
+    Gracefully degrades to empty context on any retrieval failure — the narrative pipeline
+    continues uninterrupted. Never raises; failures are logged at WARNING level.
+    """
+    if not state["sentiment_results"]:
+        return {"rag_context": []}
+
+    top_themes = state["theme_clusters"][:3]
+    theme_names = ", ".join(c["theme"] for c in top_themes) if top_themes else "general feedback"
+    query = (
+        f"Customer feedback analysis: churn risk {state['churn_risk_score']:.2f}, "
+        f"top themes: {theme_names}"
+    )
+
+    try:
+        similar = await retrieve_similar(query, client_id=state["client_id"], top_k=5)
+        context = [r["content"] for r in similar]
+        logger.info(
+            '{"event": "voc.rag_context", "client_id": "%s", "chunks": %d}',
+            state["client_id"],
+            len(context),
+        )
+        return {"rag_context": context}
+    except Exception as exc:
+        logger.warning(
+            '{"event": "voc.rag_context_failed", "client_id": "%s", "error": "%s"}',
+            state["client_id"],
+            str(exc),
+        )
+        return {"rag_context": []}
+
+
 async def narrative_generation_node(state: VoCState, llm: Any) -> dict:
-    """Generate a CEO-grade plain-language narrative from aggregate stats."""
+    """Generate a CEO-grade plain-language narrative from aggregate stats and RAG context."""
     results = state["sentiment_results"]
     if not results:
         return {"narrative": "No feedback available for this period."}
@@ -154,8 +190,16 @@ async def narrative_generation_node(state: VoCState, llm: Any) -> dict:
         f"Customer feedback summary ({len(results)} items analyzed):\n"
         f"- Mean sentiment score: {mean_sentiment:.2f} (-1.0=very negative, 1.0=very positive)\n"
         f"- Churn risk score: {churn_risk:.2f} (0.0=no risk, 1.0=critical)\n"
-        f"- Top themes: {themes_text}\n\n"
-        "Write a CEO-grade narrative: what customers feel, the key themes, the risk level, "
+        f"- Top themes: {themes_text}\n"
+    )
+
+    rag_ctx = state.get("rag_context", [])
+    if rag_ctx:
+        context_text = "\n".join(f"  - {c}" for c in rag_ctx)
+        user_msg += f"\nRelevant industry context and historical benchmarks:\n{context_text}\n"
+
+    user_msg += (
+        "\nWrite a CEO-grade narrative: what customers feel, the key themes, the risk level, "
         "and one or two recommended actions."
     )
 
@@ -266,6 +310,7 @@ def _build_voc_graph(llm: Any):
     workflow.add_node("fetch_feedback", fetch_feedback_node)
     workflow.add_node("nlp_analysis", _nlp_node)
     workflow.add_node("theme_clustering", theme_clustering_node)
+    workflow.add_node("rag_context", rag_context_node)
     workflow.add_node("narrative_generation", _narrative_node)
     workflow.add_node("check_alert", check_alert_node)
     workflow.add_node("store_results", store_results_node)
@@ -273,7 +318,8 @@ def _build_voc_graph(llm: Any):
     workflow.set_entry_point("fetch_feedback")
     workflow.add_edge("fetch_feedback", "nlp_analysis")
     workflow.add_edge("nlp_analysis", "theme_clustering")
-    workflow.add_edge("theme_clustering", "narrative_generation")
+    workflow.add_edge("theme_clustering", "rag_context")
+    workflow.add_edge("rag_context", "narrative_generation")
     workflow.add_edge("narrative_generation", "check_alert")
     workflow.add_edge("check_alert", "store_results")
     workflow.add_edge("store_results", END)
@@ -313,6 +359,7 @@ async def run_voc_analysis(client_id: UUID) -> None:
         "sentiment_results": [],
         "theme_clusters": [],
         "churn_risk_score": 0.0,
+        "rag_context": [],
         "narrative": "",
         "alert_required": False,
     }

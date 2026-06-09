@@ -382,6 +382,8 @@ async def test_voc_agent_e2e_persists_insight(db_pool, admin_conn, monkeypatch):
 
         import app.agents.voc_agent as _voc_mod
         monkeypatch.setattr(_voc_mod, "extract_feedback_batch", _fake_extract)
+        # Prevent rag_context_node from hitting the real OpenAI API (fake key is truthy)
+        monkeypatch.setattr(_voc_mod, "retrieve_similar", AsyncMock(return_value=[]))
 
         # Mock narrative LLM
         mock_llm_cls = MagicMock()
@@ -441,6 +443,8 @@ async def test_voc_agent_e2e_rls_isolation(db_pool, admin_conn, monkeypatch):
 
         import app.agents.voc_agent as _voc_mod
         monkeypatch.setattr(_voc_mod, "extract_feedback_batch", _fake_extract)
+        # Prevent rag_context_node from hitting the real OpenAI API (fake key is truthy)
+        monkeypatch.setattr(_voc_mod, "retrieve_similar", AsyncMock(return_value=[]))
         mock_llm_cls = MagicMock()
         mock_llm_cls.return_value = _make_mock_llm("All good.")
         monkeypatch.setattr(_voc_mod, "ChatOpenAI", mock_llm_cls)

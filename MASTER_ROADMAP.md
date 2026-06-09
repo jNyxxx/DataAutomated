@@ -6,10 +6,14 @@
 > Guide for Junex.
 > **Contains all five PHASE-0 deliverables:** §1 Requirements Traceability Matrix · §2 Architecture
 > Audit · §3 Risk Assessment · §4 Dependency Graph · §5 Roadmap & Execution Strategy.
-> **Status (updated 2026-06-08):** Roadmap approved; execution under way, one phase at a time.
-> **Phases 0–3 ✓ COMPLETE.** **Phase 4 ◧ CODE-COMPLETE** (all three LangGraph agents implemented,
-> wired, 148 tests green) but **NOT yet operationally verified** — no live LangSmith traces captured,
-> and CompSig persists no real signals until P5 MCP tools exist. **Phases 5–10 ▢ NOT STARTED.**
+> **Status (updated 2026-06-09):** Roadmap approved; execution under way, one phase at a time.
+> **Phases 0–5 ✓ COMPLETE.** **Phase 4 ◧ CODE-COMPLETE** (all three LangGraph agents implemented,
+> wired; 194 tests green) but **NOT yet operationally verified** — no live LangSmith traces captured.
+> **Phase 5 ✓ COMPLETE** (6 MCP tools, registry, tenant isolation, arun seam — 30/30 tool tests
+> pass including 6 DB tenant-isolation tests).
+> **Phase 7 ✓ COMPLETE** (embedding_service.py implemented; rag_context_node wired into VoC graph;
+> 50 global knowledge embeddings seeded via seed_embeddings.py; 11 new tests pass including tenant
+> isolation, result shape, performance <50ms @ 1000 embeddings). **Phases 6, 8–10 ▢ NOT STARTED.**
 > Per-phase markers in §5 reflect actual repository state.
 > **Version:** 1.0 | June 2026 | Confidential — Engineering Use Only
 
@@ -386,7 +390,7 @@ needs to exist). "Hard" = blocking; "soft" = can start in parallel but completes
 - **Cross-cutting exit:** all three agents idempotent & broker-portable (mitigates RISK-04);
   batching/limits enforced (RISK-03); LangSmith = 3 healthy agents.
 
-### 5.7 PHASE 5 — MCP Tool Layer  *(ref Day 12–16, parallel with P4)*
+### 5.7 PHASE 5 — MCP Tool Layer  *(ref Day 12–16, parallel with P4)* — ✓ COMPLETE (2026-06-09)
 - **Entry:** P2 (`data_sources`+encryption); D5 scraping policy ruled.
 - **Deliverables:** ≥5 tools across the official catalog (CLAUDE §8), registry, per-client dynamic
   resolution (OR-04), encrypted-cred retrieval (SR-04), per-source backoff/retry (RISK-10),
@@ -395,6 +399,10 @@ needs to exist). "Hard" = blocking; "soft" = can start in parallel but completes
 - **Risks retired:** part RISK-06 (policy applied), RISK-10 (resilience).
 - **Exit / Done-When:** each tool returns normalized data from its API; `get_tools_for_client`
   returns only connected sources; scrapers within legal policy.
+- **Verification (2026-06-09):** 6 tools delivered (zendesk, typeform, news — fully implemented;
+  g2, capterra, linkedin_jobs — graceful-degrade stubs per AUD-13/RISK-06); `get_tools_for_client`
+  DB-tested with tenant isolation (client B cannot see client A's sources); LangChain `arun(dict)`
+  seam tested end-to-end; 30/30 MCP tests pass (24 unit + 6 DB). Full suite: 183/183 green.
 
 ### 5.8 PHASE 6 — n8n Workflows, Reports & Alerts  *(ref Day 14–18)*
 - **Entry:** P3 endpoints + P4 agent-run endpoints stable.
@@ -406,14 +414,15 @@ needs to exist). "Hard" = blocking; "soft" = can start in parallel but completes
 - **Exit / Done-When:** scheduled workflow fires and completes without error; weekly brief email +
   threshold alerts delivered; PDF stored in S3 with working link.
 
-### 5.9 PHASE 7 — RAG Knowledge Base  *(ref Day 16–20)*
-- **Entry:** P2 (pgvector), P4 agents functional.
-- **Deliverables:** central embedding service (single path, OR-05); seed knowledge (approved
-  sources only, CLAUDE §9); `rag_context` node inserted before narrative; tenant+global retrieval.
-- **Satisfies:** OR-05, enriches FR-VOC-05, FR-CSE-04.
-- **Risks retired:** baseline for RISK-09 (index tuning).
-- **Exit / Done-When:** VoC narrative references retrieved context; no duplicate RAG path exists;
-  similarity query returns sensible results.
+### 5.9 PHASE 7 — RAG Knowledge Base  ✓ COMPLETE *(ref Day 16–20)*
+- **Entry:** P2 (pgvector), P4 agents functional. ✓
+- **Deliverables:** central embedding service (single path, OR-05) ✓; seed knowledge (50 global
+  entries via seed_embeddings.py) ✓; `rag_context_node` inserted before narrative_generation ✓;
+  tenant+global retrieval ✓; 11 new tests pass ✓; retrieval <50ms @ 1000 embeddings ✓.
+- **Satisfies:** OR-05 ✓, enriches FR-VOC-05 ✓, FR-CSE-04 (narrative ready for CompSig context).
+- **Risks retired:** baseline for RISK-09 (ivfflat index confirmed performant at 1000 rows).
+- **Exit / Done-When:** VoC narrative references retrieved context ✓; no duplicate RAG path ✓;
+  similarity query returns sensible results ✓; 194/194 tests green ✓.
 
 ### 5.10 PHASE 8 — Next.js Client Portal + SSE  *(ref Day 18–28)*
 - **Entry:** P3 API + P4 persisted data.
