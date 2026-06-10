@@ -41,6 +41,9 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        # Inlined into client bundles at next-build time (see frontend/Dockerfile).
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
     container_name: da_frontend
     env_file:
       - .env
@@ -54,12 +57,15 @@ services:
   n8n:
     image: n8nio/n8n:latest
     container_name: da_n8n
+    env_file:
+      - .env
     environment:
       N8N_BASIC_AUTH_ACTIVE: ${N8N_BASIC_AUTH_ACTIVE:-true}
       N8N_BASIC_AUTH_USER: ${N8N_BASIC_AUTH_USER:-admin}
       N8N_BASIC_AUTH_PASSWORD: ${N8N_BASIC_AUTH_PASSWORD:-change_me_locally}
       N8N_HOST: ${N8N_HOST:-localhost}
       N8N_PORT: ${N8N_PORT:-5678}
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
     ports:
       - "5678:5678"
     volumes:

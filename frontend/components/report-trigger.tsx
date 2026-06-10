@@ -9,7 +9,7 @@ export default function ReportTrigger({ token }: { token: string }) {
   async function trigger() {
     setStatus('loading');
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/reports/generate`, {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'}/api/reports/generate`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${token}`,

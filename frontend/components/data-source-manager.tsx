@@ -19,7 +19,7 @@ export default function DataSourceManager({ token, categories, sourceLabels }: P
     setStatus('loading');
     setErrorMsg('');
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/data-sources`, {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'}/api/data-sources`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${token}`,
