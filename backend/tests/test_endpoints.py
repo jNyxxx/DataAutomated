@@ -357,3 +357,17 @@ async def test_insights_latest_with_auth(bearer_token):
         )
     assert resp.status_code == 200
     assert "insight" in resp.json()
+
+
+# ---------------------------------------------------------------------------
+# Data sources — one active source per type per client (CLAUDE.md §8)
+# bearer_token teardown deletes the client, cascading the data_sources rows.
+# ---------------------------------------------------------------------------
+
+async def test_data_source_duplicate_type_returns_409(bearer_token):
+    headers = {"Authorization": f"Bearer {bearer_token}"}
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        first = await ac.post("/api/data-sources", headers=headers, json={"source_type": "zendesk"})
+        second = await ac.post("/api/data-sources", headers=headers, json={"source_type": "zendesk"})
+    assert first.status_code == 201, f"first connect should succeed: {first.json()}"
+    assert second.status_code == 409, "a second active source of the same type must be rejected"

@@ -328,6 +328,10 @@ async def add_data_source(
     """
     Add a new data source for the authenticated client.
     Credentials are AES-256-encrypted at the app layer before storage (CLAUDE.md §14).
+
+    Uniqueness rule: a client may only connect ONE active source per source_type
+    (the MCP tool registry resolves tools by source_type key — CLAUDE.md §8).
+    Returns 409 Conflict if an active source of the same type already exists.
     """
     import uuid as _uuid
     from app.services.credential_encryption import encrypt_credentials
@@ -339,10 +343,24 @@ async def add_data_source(
     if not source_type:
         raise HTTPException(status_code=422, detail="source_type is required")
 
-    encrypted = encrypt_credentials(raw_credentials) if raw_credentials else {}
-    new_id = _uuid.uuid4()
-
     async with acquire_for_client(current_user.client_id) as conn:
+        # Uniqueness guard: one active source per type per client (CLAUDE.md §8).
+        existing = await conn.fetchval(
+            """SELECT id FROM data_sources
+               WHERE client_id = $1 AND source_type = $2 AND is_active = TRUE
+               LIMIT 1""",
+            current_user.client_id,
+            source_type,
+        )
+        if existing is not None:
+            raise HTTPException(
+                status_code=409,
+                detail=f"A '{source_type}' source is already connected and active. "
+                       "Disconnect or deactivate it before adding another.",
+            )
+
+        encrypted = encrypt_credentials(raw_credentials) if raw_credentials else {}
+        new_id = _uuid.uuid4()
         await conn.execute(
             """INSERT INTO data_sources (id, client_id, source_type, credentials, config, is_active, created_at)
                VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, TRUE, NOW())""",
