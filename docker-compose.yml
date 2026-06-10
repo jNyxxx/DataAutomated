@@ -49,6 +49,8 @@ services:
       - .env
     environment:
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+      # Runtime-only: SSR fetches reach the backend over the compose network.
+      API_URL_INTERNAL: http://backend:8000
     ports:
       - "3000:3000"
     depends_on:

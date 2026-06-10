@@ -1,6 +1,13 @@
 import type { DashboardSummary, Insight, Journey, Signal } from './types';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
+// In the browser, NEXT_PUBLIC_API_URL is inlined at build time and must be
+// host-reachable (http://localhost:8000). During SSR inside Docker, localhost
+// is the frontend container itself — API_URL_INTERNAL (runtime env, e.g.
+// http://backend:8000) points at the backend on the compose network.
+const API_URL =
+  typeof window === 'undefined'
+    ? process.env.API_URL_INTERNAL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'
+    : process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
 export async function apiRequest<T>(path: string, token?: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_URL}${path}`, {

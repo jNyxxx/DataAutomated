@@ -1,3 +1,5 @@
+'use client';
+
 interface KpiCardProps {
   label: string;
   value: string | number | null;
