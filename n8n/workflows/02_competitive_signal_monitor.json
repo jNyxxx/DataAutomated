@@ -81,7 +81,7 @@
     {
       "parameters": {
         "method": "GET",
-        "url": "=={{$env.BACKEND_URL}}/signals/latest",
+        "url": "={{$env.BACKEND_URL}}/signals/latest",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -135,10 +135,10 @@
             {
               "id": "cond-unread",
               "leftValue": "={{ $json.is_read }}",
-              "rightValue": false,
+              "rightValue": "False",
               "operator": {
-                "type": "boolean",
-                "operation": "false"
+                "type": "string",
+                "operation": "equals"
               }
             }
           ],
