@@ -574,7 +574,7 @@ async def test_get_tools_unknown_source_type_silently_excluded(db_pool, admin_co
     suffix = str(uuid.uuid4())[:8]
     client_id = await _seed_client(admin_conn, suffix)
     try:
-        await _seed_source(admin_conn, client_id, "intercom")  # not in registry yet
+        await _seed_source(admin_conn, client_id, "unknown_vendor_xyz")  # no tool registered
 
         tools = await get_tools_for_client(client_id)
         assert tools == []
@@ -705,3 +705,210 @@ async def test_mine_signals_registry_failure_returns_empty(monkeypatch):
 
     result = await mine_signals_node(_base_state())
     assert result == {"raw_signals": []}
+
+
+# ---------------------------------------------------------------------------
+# 7. Phase 5b tools — intercom / mixpanel / segment / shopify
+# ---------------------------------------------------------------------------
+
+_FAKE_INTERCOM_CREDS = {"access_token": "ic_tok_123"}
+_FAKE_MIXPANEL_CREDS = {"api_secret": "mp_secret_123"}
+_FAKE_SEGMENT_CREDS = {"space_id": "spa_1", "access_token": "seg_tok_123"}
+_FAKE_SHOPIFY_CREDS = {"shop_domain": "acme", "access_token": "shpat_123"}
+
+
+async def test_intercom_normalizes_response():
+    from app.tools.intercom_tool import IntercomConversationsTool
+
+    tool = IntercomConversationsTool()
+    fake_payload = {
+        "conversations": [
+            {
+                "id": 9001,
+                "state": "open",
+                "created_at": 1750000000,
+                "source": {"subject": "Billing question", "body": "<p>Why was I charged twice?</p>"},
+            }
+        ]
+    }
+    mock_client = _mock_httpx_client(_mock_response(200, fake_payload))
+    mock_client.post = AsyncMock(return_value=_mock_response(200, fake_payload))
+
+    with patch.object(IntercomConversationsTool, "_load_credentials", new=AsyncMock(return_value=_FAKE_INTERCOM_CREDS)):
+        with patch("app.tools.intercom_tool.httpx.AsyncClient", return_value=mock_client):
+            result = await tool._arun(client_id=uuid.uuid4(), since_hours=24)
+
+    assert len(result) == 1
+    assert result[0]["id"] == "9001"
+    assert result[0]["content"] == "Why was I charged twice?"
+    assert "<p>" not in result[0]["content"]
+    assert result[0]["metadata"]["subject"] == "Billing question"
+    assert result[0]["metadata"]["source_type"] == "intercom"
+
+
+async def test_intercom_returns_empty_on_api_error():
+    from app.tools.intercom_tool import IntercomConversationsTool
+
+    tool = IntercomConversationsTool()
+    mock_client = _mock_httpx_client(_mock_response(401, {}))
+    mock_client.post = AsyncMock(return_value=_mock_response(401, {}))
+
+    with patch.object(IntercomConversationsTool, "_load_credentials", new=AsyncMock(return_value=_FAKE_INTERCOM_CREDS)):
+        with patch("app.tools.intercom_tool.httpx.AsyncClient", return_value=mock_client):
+            result = await tool._arun(client_id=uuid.uuid4(), since_hours=24)
+
+    assert result == []
+
+
+async def test_mixpanel_normalizes_ndjson_export():
+    from app.tools.journey_tool import MixpanelEventsTool
+
+    tool = MixpanelEventsTool()
+    ndjson = "\n".join([
+        json.dumps({"event": "page_view", "properties": {
+            "time": 1750000000, "distinct_id": "user_1", "$insert_id": "ins_1",
+            "$current_url": "https://app.example.com/signup"}}),
+        json.dumps({"event": "form_start", "properties": {
+            "time": 1750000060, "distinct_id": "user_1", "$insert_id": "ins_2"}}),
+        "not-json-garbage",
+    ])
+    resp = _mock_response(200, {})
+    resp.text = ndjson
+    mock_client = _mock_httpx_client(resp)
+
+    with patch.object(MixpanelEventsTool, "_load_credentials", new=AsyncMock(return_value=_FAKE_MIXPANEL_CREDS)):
+        with patch("app.tools.journey_tool.httpx.AsyncClient", return_value=mock_client):
+            result = await tool._arun(client_id=uuid.uuid4(), since_hours=24)
+
+    assert len(result) == 2
+    assert result[0]["id"] == "ins_1"
+    assert result[0]["content"] == "page_view"
+    assert result[0]["metadata"]["event_type"] == "page_view"
+    assert result[0]["metadata"]["user_id"] == "user_1"
+    assert result[0]["metadata"]["occurred_at"] is not None
+    assert result[0]["metadata"]["source_type"] == "mixpanel"
+    assert result[0]["metadata"]["properties"]["$current_url"] == "https://app.example.com/signup"
+
+
+async def test_mixpanel_returns_empty_on_api_error():
+    from app.tools.journey_tool import MixpanelEventsTool
+
+    tool = MixpanelEventsTool()
+    mock_client = _mock_httpx_client(_mock_response(401, {}))
+
+    with patch.object(MixpanelEventsTool, "_load_credentials", new=AsyncMock(return_value=_FAKE_MIXPANEL_CREDS)):
+        with patch("app.tools.journey_tool.httpx.AsyncClient", return_value=mock_client):
+            result = await tool._arun(client_id=uuid.uuid4(), since_hours=24)
+
+    assert result == []
+
+
+async def test_segment_degrades_without_user_ids():
+    """Segment has no global event-export endpoint — no configured user_ids → []."""
+    from app.tools.journey_tool import SegmentEventsTool
+
+    tool = SegmentEventsTool()
+    result = await tool._arun(client_id=uuid.uuid4(), user_ids=[])
+    assert result == []
+
+
+async def test_segment_normalizes_profile_events():
+    from app.tools.journey_tool import SegmentEventsTool
+
+    tool = SegmentEventsTool()
+    fake_payload = {
+        "data": [
+            {
+                "type": "track", "event": "checkout_started",
+                "timestamp": "2099-06-01T10:00:00Z", "message_id": "msg_1",
+                "context": {"sessionId": "sess_9"},
+                "properties": {"cart_value": 99.0},
+            }
+        ]
+    }
+    mock_client = _mock_httpx_client(_mock_response(200, fake_payload))
+
+    with patch.object(SegmentEventsTool, "_load_credentials", new=AsyncMock(return_value=_FAKE_SEGMENT_CREDS)):
+        with patch("app.tools.journey_tool.httpx.AsyncClient", return_value=mock_client):
+            result = await tool._arun(client_id=uuid.uuid4(), user_ids=["u_1"], since_hours=24)
+
+    assert len(result) == 1
+    assert result[0]["id"] == "msg_1"
+    assert result[0]["metadata"]["event_type"] == "checkout_started"
+    assert result[0]["metadata"]["session_id"] == "sess_9"
+    assert result[0]["metadata"]["user_id"] == "u_1"
+    assert result[0]["metadata"]["properties"]["cart_value"] == 99.0
+    assert result[0]["metadata"]["source_type"] == "segment"
+
+
+async def test_shopify_normalizes_events():
+    from app.tools.journey_tool import ShopifyEventsTool
+
+    tool = ShopifyEventsTool()
+    fake_payload = {
+        "events": [
+            {
+                "id": 555, "subject_type": "Order", "verb": "create",
+                "created_at": "2026-06-01T10:00:00-04:00", "author": "shopify",
+                "message": "Order #1001 was created", "subject_id": 1001,
+            }
+        ]
+    }
+    mock_client = _mock_httpx_client(_mock_response(200, fake_payload))
+
+    with patch.object(ShopifyEventsTool, "_load_credentials", new=AsyncMock(return_value=_FAKE_SHOPIFY_CREDS)):
+        with patch("app.tools.journey_tool.httpx.AsyncClient", return_value=mock_client):
+            result = await tool._arun(client_id=uuid.uuid4(), since_hours=24)
+
+    assert len(result) == 1
+    assert result[0]["id"] == "555"
+    assert result[0]["metadata"]["event_type"] == "order_create"
+    assert result[0]["metadata"]["session_id"] == "1001"
+    assert result[0]["metadata"]["occurred_at"] == "2026-06-01T10:00:00-04:00"
+    assert result[0]["metadata"]["source_type"] == "shopify"
+
+
+async def test_shopify_returns_empty_on_api_error():
+    from app.tools.journey_tool import ShopifyEventsTool
+
+    tool = ShopifyEventsTool()
+    mock_client = _mock_httpx_client(_mock_response(403, {}))
+
+    with patch.object(ShopifyEventsTool, "_load_credentials", new=AsyncMock(return_value=_FAKE_SHOPIFY_CREDS)):
+        with patch("app.tools.journey_tool.httpx.AsyncClient", return_value=mock_client):
+            result = await tool._arun(client_id=uuid.uuid4(), since_hours=24)
+
+    assert result == []
+
+
+async def test_new_tools_credentials_not_in_output():
+    """SR-04: no credential material may appear anywhere in normalized output."""
+    from app.tools.intercom_tool import IntercomConversationsTool
+
+    tool = IntercomConversationsTool()
+    fake_payload = {
+        "conversations": [
+            {"id": 1, "state": "open", "created_at": 1, "source": {"subject": "s", "body": "hello"}}
+        ]
+    }
+    mock_client = _mock_httpx_client(_mock_response(200, fake_payload))
+    mock_client.post = AsyncMock(return_value=_mock_response(200, fake_payload))
+
+    with patch.object(IntercomConversationsTool, "_load_credentials", new=AsyncMock(return_value=_FAKE_INTERCOM_CREDS)):
+        with patch("app.tools.intercom_tool.httpx.AsyncClient", return_value=mock_client):
+            result = await tool._arun(client_id=uuid.uuid4())
+
+    assert _FAKE_INTERCOM_CREDS["access_token"] not in json.dumps(result)
+
+
+async def test_registry_contains_all_mvp_source_types():
+    """CLAUDE.md §8 — every MVP source type has a registered tool."""
+    from app.tools.registry import TOOL_REGISTRY
+
+    expected = {
+        "zendesk", "typeform", "intercom",
+        "news", "g2", "capterra", "linkedin_jobs",
+        "mixpanel", "segment", "shopify",
+    }
+    assert expected == set(TOOL_REGISTRY.keys())
+    assert all(t.category in ("voc", "compsig", "journey") for t in TOOL_REGISTRY.values())

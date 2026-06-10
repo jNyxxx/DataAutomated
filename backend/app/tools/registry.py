@@ -13,10 +13,9 @@ synchronous get_client_data_sources helper.  DB access requires async (asyncpg p
 both functions are async.  This deviation is safe and consistent with acquire_for_client
 and the async-first architecture — mirrors the deviation note in database.py.
 
-Missing from registry (no tool class yet — Phase 5 scope):
-  "intercom", "mixpanel", "segment", "shopify"
-The if-src-in-TOOL_REGISTRY guard handles these transparently: clients with those
-sources connected simply get no tool for that source_type.
+All ten §8 MVP source types are registered. The if-src-in-TOOL_REGISTRY guard
+still protects against unknown source_types: clients with an unrecognized source
+connected simply get no tool for it.
 """
 
 from __future__ import annotations
@@ -26,6 +25,12 @@ from uuid import UUID
 
 from app.database import acquire_for_client
 from app.tools.base_tool import DataAutomatedBaseTool
+from app.tools.intercom_tool import IntercomConversationsTool
+from app.tools.journey_tool import (
+    MixpanelEventsTool,
+    SegmentEventsTool,
+    ShopifyEventsTool,
+)
 from app.tools.scraper_tool import (
     CapterraReviewScraper,
     G2ReviewScraper,
@@ -46,10 +51,14 @@ logger = logging.getLogger("dataautomated")
 TOOL_REGISTRY: dict[str, DataAutomatedBaseTool] = {
     "zendesk":       ZendeskFeedbackTool(),
     "typeform":      TypeformResponseTool(),
+    "intercom":      IntercomConversationsTool(),
     "news":          NewsSignalTool(),
     "g2":            G2ReviewScraper(),
     "capterra":      CapterraReviewScraper(),
     "linkedin_jobs": LinkedInJobsScraper(),
+    "mixpanel":      MixpanelEventsTool(),
+    "segment":       SegmentEventsTool(),
+    "shopify":       ShopifyEventsTool(),
 }
 
 

@@ -6,7 +6,7 @@ Routes:
   GET  /insights/latest           — latest feedback_insights row for the caller's client
   GET  /stream/insights           — SSE stream; 5s server-side poll (CLAUDE.md §12)
   POST /api/agents/voc/run        — n8n alias for /insights/analyze
-  POST /api/ingest/trigger        — n8n ingest trigger (stub; Phase 4 wires the agent body)
+  POST /api/ingest/trigger        — n8n ingest trigger (runs the MCP ingestion pipeline)
 
 All read endpoints use acquire_for_client (RLS + explicit WHERE) per CLAUDE.md §6.
 No agent run may block an HTTP request (CLAUDE.md §10 background task rule).
@@ -154,11 +154,16 @@ async def n8n_voc_run(
     return await _dispatch_voc(background_tasks, current_user)
 
 
-@_extra.post("/api/ingest/trigger", status_code=202, summary="[n8n] Trigger data ingestion")
+@_extra.post("/api/ingest/trigger", status_code=200, summary="[n8n] Trigger data ingestion")
 async def n8n_ingest_trigger(current_user: CurrentUser = Depends(get_current_user)):
-    """Stub — Phase 4 wires the MCP tool ingestion pipeline here."""
-    logger.info(
-        '{"event": "dispatch.queued", "agent": "ingest", "client_id": "%s"}',
-        current_user.client_id,
-    )
-    return {"status": "ingestion_queued", "ingestion_count": 0}
+    """
+    Run the MCP-tool ingestion pipeline for the caller's client.
+
+    Synchronous by contract: n8n Workflow 1 branches on the returned
+    ingestion_count (> 0 → run the VoC agent), so the count must be real.
+    Tool I/O only — no LangGraph agent runs on the request path (§2/§10).
+    """
+    from app.services.ingestion_service import run_ingestion
+
+    result = await run_ingestion(current_user.client_id)
+    return {"status": "ingestion_complete", **result}
