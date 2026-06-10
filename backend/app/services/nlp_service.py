@@ -17,6 +17,8 @@ from typing import Any, Literal
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field, ValidationError
 
+from app.services.llm_json import loads_tolerant
+
 logger = logging.getLogger("dataautomated")
 
 _BATCH_SIZE = 20
@@ -99,7 +101,7 @@ async def extract_feedback_batch(
             ) from exc
 
         try:
-            parsed = json.loads(raw)
+            parsed = loads_tolerant(raw)
             if not isinstance(parsed, list):
                 raise ValueError("LLM returned non-array JSON")
         except (json.JSONDecodeError, ValueError) as exc:

@@ -38,6 +38,7 @@ from pydantic import BaseModel, Field, ValidationError
 from app.config import settings
 from app.database import acquire_for_client
 from app.services.audit_service import record_audit
+from app.services.llm_json import loads_tolerant
 
 logger = logging.getLogger("dataautomated")
 
@@ -201,7 +202,7 @@ async def diagnose_friction_node(state: JourneyState, llm: Any) -> dict:
     try:
         response = await llm.ainvoke([SystemMessage(content=system_msg), HumanMessage(content=user_msg)])
         raw = response.content if hasattr(response, "content") else str(response)
-        loaded = json.loads(raw)
+        loaded = loads_tolerant(raw)
         if isinstance(loaded, list):
             parsed = loaded
     except Exception as exc:  # noqa: BLE001
@@ -258,7 +259,7 @@ async def generate_recommendations_node(state: JourneyState, llm: Any) -> dict:
     try:
         response = await llm.ainvoke([SystemMessage(content=system_msg), HumanMessage(content=user_msg)])
         raw = response.content if hasattr(response, "content") else str(response)
-        loaded = json.loads(raw)
+        loaded = loads_tolerant(raw)
         if isinstance(loaded, dict):
             recs_raw = loaded.get("recommendations", []) or []
             narrative = loaded.get("narrative", "") or ""

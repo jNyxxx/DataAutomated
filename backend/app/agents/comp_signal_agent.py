@@ -40,6 +40,7 @@ from pydantic import BaseModel, ValidationError
 from app.config import settings
 from app.database import acquire_for_client
 from app.services.audit_service import record_audit
+from app.services.llm_json import loads_tolerant
 from app.tools.registry import get_tools_for_client
 
 logger = logging.getLogger("dataautomated")
@@ -208,7 +209,7 @@ async def classify_signals_node(state: CompSignalState, llm: Any) -> dict:
     try:
         response = await llm.ainvoke(_build_classify_messages(signals))
         raw = response.content if hasattr(response, "content") else str(response)
-        loaded = json.loads(raw)
+        loaded = loads_tolerant(raw)
         if isinstance(loaded, list):
             parsed = loaded
     except Exception as exc:  # noqa: BLE001 — degrade gracefully, never crash the graph
@@ -270,7 +271,7 @@ async def generate_strategic_context_node(state: CompSignalState, llm: Any) -> d
     try:
         response = await llm.ainvoke([SystemMessage(content=system_msg), HumanMessage(content=user_msg)])
         raw = response.content if hasattr(response, "content") else str(response)
-        loaded = json.loads(raw)
+        loaded = loads_tolerant(raw)
         if isinstance(loaded, list):
             contexts = loaded
     except Exception as exc:  # noqa: BLE001
