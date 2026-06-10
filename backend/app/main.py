@@ -16,8 +16,6 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from typing import Any
 
-from hmac import compare_digest
-
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -25,7 +23,13 @@ import app.database as _db
 from app.config import settings
 from app.database import acquire_for_client, close_pool, init_pool
 from app.routers import auth, insights, journeys, signals
-from app.routers.auth import CurrentUser, get_current_user
+from app.routers.auth import (
+    CurrentUser,
+    get_current_user,
+    oauth2_scheme_optional,
+    resolve_service_client,
+    verify_n8n_secret,
+)
 
 
 @asynccontextmanager
@@ -69,17 +73,9 @@ async def require_n8n_webhook_secret(
 
     CLAUDE.md §13 requires webhook auth via N8N_WEBHOOK_SECRET.  These routes
     expose cross-client operational data, so they must not be anonymously
-    reachable even in the Phase 3 stub implementation.
+    reachable.  Validation logic lives in app.routers.auth.verify_n8n_secret.
     """
-    expected = settings.n8n_webhook_secret
-    if not expected or x_n8n_webhook_secret is None or not compare_digest(
-        x_n8n_webhook_secret,
-        expected,
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Unauthorized.",
-        )
+    verify_n8n_secret(x_n8n_webhook_secret)
 
 
 # ---- Health ----
@@ -165,27 +161,41 @@ async def list_reports(current_user: CurrentUser = Depends(get_current_user)):
 async def generate_report(
     payload: dict[str, Any],
     bg: BackgroundTasks,
-    current_user: CurrentUser = Depends(get_current_user),
+    token: str | None = Depends(oauth2_scheme_optional),
+    x_n8n_webhook_secret: str | None = Header(default=None),
 ):
     """
-    Trigger PDF report generation for the authenticated client (background task).
-    Returns immediately; report_service generates PDF + S3 upload async.
+    Trigger PDF report generation (background task). Returns immediately;
+    report_service generates PDF + S3 upload async.
+
+    Dual-consumer auth: the dashboard sends a JWT bearer (client scope from the
+    token); n8n Workflow 3 loops over all clients and authenticates with
+    X-N8N-Webhook-Secret + an explicit client_id in the body (§13/§6).
     """
-    from app.services.report_service import generate_report as _generate
+    if token is not None:
+        current_user = await get_current_user(token)
+        resolved_client_id = current_user.client_id
+    else:
+        verify_n8n_secret(x_n8n_webhook_secret)
+        resolved_client_id = await resolve_service_client(payload.get("client_id"))
 
     report_type = payload.get("report_type", "weekly_intelligence")
     period = payload.get("period", "last_7_days")
-    client_id = str(current_user.client_id)
+    client_id = str(resolved_client_id)
 
     async def _run():
         if _db.pool is None:
             return
-        async with _db.pool.acquire() as conn:
-            try:
+        try:
+            # Lazy import: keeps the trigger path light and free of the PDF/S3
+            # dependency chain (WeasyPrint/boto3) until the background run.
+            from app.services.report_service import generate_report as _generate
+
+            async with _db.pool.acquire() as conn:
                 await _generate(conn, client_id, report_type, period)
-            except Exception as exc:
-                import logging
-                logging.getLogger(__name__).error("report generation failed: %s", exc)
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).error("report generation failed: %s", exc)
 
     bg.add_task(_run)
     return {"status": "report_queued", "s3_key": None}

@@ -208,31 +208,119 @@ async def test_me_requires_auth():
 
 
 # ---------------------------------------------------------------------------
-# n8n agent-run aliases (P3/P4 — same dispatch as primary /analyze routes)
+# n8n agent-run aliases — server-to-server auth (X-N8N-Webhook-Secret + explicit
+# client_id per §13/§6; n8n loops over clients, so per-client JWTs cannot work)
 # ---------------------------------------------------------------------------
 
-async def test_n8n_voc_run_alias_returns_202(bearer_token):
+@pytest.fixture
+async def n8n_client_id(db_pool, monkeypatch):
+    """Seed an active client and arm the webhook secret; yield the client id."""
+    monkeypatch.setattr(settings, "n8n_webhook_secret", "test-internal-secret")
+    suffix = str(_uuid.uuid4())[:8]
+    email = f"n8nco_{suffix}@unit.com"
+    conn = await asyncpg.connect(TEST_DB_DSN)
+    try:
+        client_id = await conn.fetchval(
+            "INSERT INTO clients (name, email) VALUES ($1, $2) RETURNING id;",
+            f"n8n Test Co {suffix}", email,
+        )
+    finally:
+        await conn.close()
+
+    yield str(client_id)
+
+    conn = await asyncpg.connect(TEST_DB_DSN)
+    try:
+        await conn.execute("DELETE FROM clients WHERE email = $1;", email)
+    finally:
+        await conn.close()
+
+
+_N8N_HEADERS = {"X-N8N-Webhook-Secret": "test-internal-secret"}
+
+
+async def test_n8n_voc_run_alias_returns_202(n8n_client_id):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         resp = await ac.post(
-            "/api/agents/voc/run", headers={"Authorization": f"Bearer {bearer_token}"}
+            "/api/agents/voc/run",
+            headers=_N8N_HEADERS,
+            json={"client_id": n8n_client_id},
         )
     assert resp.status_code == 202
     assert resp.json()["status"] == "analysis_queued"
 
 
-async def test_n8n_competitive_signal_run_alias_returns_202(bearer_token):
+async def test_n8n_competitive_signal_run_alias_returns_202(n8n_client_id):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         resp = await ac.post(
             "/api/agents/competitive-signal/run",
-            headers={"Authorization": f"Bearer {bearer_token}"},
+            headers=_N8N_HEADERS,
+            json={"client_id": n8n_client_id},
         )
     assert resp.status_code == 202
     assert resp.json()["status"] == "analysis_queued"
 
 
-async def test_n8n_voc_run_alias_requires_auth():
+async def test_n8n_voc_run_alias_requires_secret(n8n_client_id):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        resp = await ac.post("/api/agents/voc/run")
+        resp = await ac.post("/api/agents/voc/run", json={"client_id": n8n_client_id})
+    assert resp.status_code == 401
+
+
+async def test_n8n_voc_run_alias_rejects_unknown_client(n8n_client_id):
+    """A valid secret but an unknown client_id must 404, not run cross-tenant."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        resp = await ac.post(
+            "/api/agents/voc/run",
+            headers=_N8N_HEADERS,
+            json={"client_id": str(_uuid.uuid4())},
+        )
+    assert resp.status_code == 404
+
+
+async def test_n8n_ingest_trigger_requires_secret(n8n_client_id):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        resp = await ac.post("/api/ingest/trigger", json={"client_id": n8n_client_id})
+    assert resp.status_code == 401
+
+
+async def test_n8n_latest_signals_for_client(n8n_client_id):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        resp = await ac.get(
+            f"/api/signals/latest-for-client?client_id={n8n_client_id}",
+            headers=_N8N_HEADERS,
+        )
+    assert resp.status_code == 200
+    assert resp.json() == {"signals": []}
+
+
+async def test_reports_generate_accepts_jwt(bearer_token):
+    """Dashboard path: JWT bearer still works on the dual-auth route."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        resp = await ac.post(
+            "/api/reports/generate",
+            headers={"Authorization": f"Bearer {bearer_token}"},
+            json={"report_type": "weekly_intelligence", "period": "last_7_days"},
+        )
+    assert resp.status_code == 202
+    assert resp.json()["status"] == "report_queued"
+
+
+async def test_reports_generate_accepts_n8n_secret(n8n_client_id):
+    """n8n path: webhook secret + explicit client_id on the dual-auth route."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        resp = await ac.post(
+            "/api/reports/generate",
+            headers=_N8N_HEADERS,
+            json={"client_id": n8n_client_id, "report_type": "weekly_intelligence"},
+        )
+    assert resp.status_code == 202
+    assert resp.json()["status"] == "report_queued"
+
+
+async def test_reports_generate_rejects_anonymous(n8n_client_id):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        resp = await ac.post("/api/reports/generate", json={"client_id": n8n_client_id})
     assert resp.status_code == 401
 
 

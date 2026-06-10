@@ -58,8 +58,8 @@
         "headerParameters": {
           "parameters": [
             {
-              "name": "Authorization",
-              "value": "=Bearer {{$env.N8N_SERVICE_TOKEN}}"
+              "name": "X-N8N-Webhook-Secret",
+              "value": "={{$env.N8N_WEBHOOK_SECRET}}"
             },
             {
               "name": "Content-Type",
@@ -81,17 +81,13 @@
     {
       "parameters": {
         "method": "GET",
-        "url": "={{$env.BACKEND_URL}}/signals/latest",
+        "url": "={{$env.BACKEND_URL}}/api/signals/latest-for-client?client_id={{ $('Split Clients').item.json.id }}",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
             {
-              "name": "Authorization",
-              "value": "=Bearer {{$env.N8N_SERVICE_TOKEN}}"
-            },
-            {
-              "name": "X-Client-ID",
-              "value": "={{ $('Split Clients').item.json.id }}"
+              "name": "X-N8N-Webhook-Secret",
+              "value": "={{$env.N8N_WEBHOOK_SECRET}}"
             }
           ]
         },

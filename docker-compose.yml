@@ -27,6 +27,9 @@ services:
     container_name: da_backend
     env_file:
       - .env
+    environment:
+      # Compose-network topology (not a secret): churn alerts go to the n8n container.
+      N8N_WEBHOOK_URL: http://n8n:5678
     ports:
       - "8000:8000"
     depends_on:
@@ -68,6 +71,8 @@ services:
       N8N_HOST: ${N8N_HOST:-localhost}
       N8N_PORT: ${N8N_PORT:-5678}
       N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
+      # Workflows reach the backend over the compose network via {{$env.BACKEND_URL}}.
+      BACKEND_URL: http://backend:8000
     ports:
       - "5678:5678"
     volumes:

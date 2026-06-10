@@ -17,15 +17,20 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from typing import Optional
+from typing import Any, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Depends
+from fastapi import APIRouter, BackgroundTasks, Depends, Header
 from fastapi.responses import StreamingResponse
 
 from app.config import settings
 from app.database import acquire_for_client
-from app.routers.auth import CurrentUser, get_current_user
+from app.routers.auth import (
+    CurrentUser,
+    get_current_user,
+    resolve_service_client,
+    verify_n8n_secret,
+)
 
 logger = logging.getLogger("dataautomated")
 
@@ -58,13 +63,13 @@ async def _run_voc_analysis(client_id: UUID) -> None:
 
 async def _dispatch_voc(
     background_tasks: BackgroundTasks,
-    current_user: CurrentUser,
+    client_id: UUID,
 ):
     """Shared handler for analyze + n8n alias — enqueues and returns 202 immediately."""
-    background_tasks.add_task(_run_voc_analysis, client_id=current_user.client_id)
+    background_tasks.add_task(_run_voc_analysis, client_id=client_id)
     logger.info(
         '{"event": "dispatch.queued", "agent": "voc", "client_id": "%s"}',
-        current_user.client_id,
+        client_id,
     )
     return {"status": "analysis_queued", "message": "VoC analysis dispatched."}
 
@@ -74,7 +79,7 @@ async def analyze(
     background_tasks: BackgroundTasks,
     current_user: CurrentUser = Depends(get_current_user),
 ):
-    return await _dispatch_voc(background_tasks, current_user)
+    return await _dispatch_voc(background_tasks, current_user.client_id)
 
 
 # ---------------------------------------------------------------------------
@@ -148,22 +153,37 @@ async def stream_insights(current_user: CurrentUser = Depends(get_current_user))
 
 @_extra.post("/api/agents/voc/run", status_code=202, summary="[n8n] Trigger VoC agent")
 async def n8n_voc_run(
+    payload: dict[str, Any],
     background_tasks: BackgroundTasks,
-    current_user: CurrentUser = Depends(get_current_user),
+    x_n8n_webhook_secret: str | None = Header(default=None),
 ):
-    return await _dispatch_voc(background_tasks, current_user)
+    """
+    n8n server-to-server trigger (CLAUDE.md §13): auth via X-N8N-Webhook-Secret;
+    the workflow loops over clients and passes each client_id explicitly (§6).
+    """
+    verify_n8n_secret(x_n8n_webhook_secret)
+    client_id = await resolve_service_client(payload.get("client_id"))
+    return await _dispatch_voc(background_tasks, client_id)
 
 
 @_extra.post("/api/ingest/trigger", status_code=200, summary="[n8n] Trigger data ingestion")
-async def n8n_ingest_trigger(current_user: CurrentUser = Depends(get_current_user)):
+async def n8n_ingest_trigger(
+    payload: dict[str, Any],
+    x_n8n_webhook_secret: str | None = Header(default=None),
+):
     """
-    Run the MCP-tool ingestion pipeline for the caller's client.
+    Run the MCP-tool ingestion pipeline for the client named in the body.
 
-    Synchronous by contract: n8n Workflow 1 branches on the returned
-    ingestion_count (> 0 → run the VoC agent), so the count must be real.
+    Auth: X-N8N-Webhook-Secret (server-to-server, §13) — n8n Workflow 1 loops
+    over all active clients, so per-client JWTs cannot work here; the explicit
+    client_id satisfies §6 and is validated against active clients.
+    Synchronous by contract: n8n branches on the returned ingestion_count
+    (> 0 → run the VoC agent), so the count must be real.
     Tool I/O only — no LangGraph agent runs on the request path (§2/§10).
     """
     from app.services.ingestion_service import run_ingestion
 
-    result = await run_ingestion(current_user.client_id)
+    verify_n8n_secret(x_n8n_webhook_secret)
+    client_id = await resolve_service_client(payload.get("client_id"))
+    result = await run_ingestion(client_id)
     return {"status": "ingestion_complete", **result}

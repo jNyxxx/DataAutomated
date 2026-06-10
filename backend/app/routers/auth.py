@@ -16,6 +16,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from hmac import compare_digest
 from uuid import UUID
 
 import asyncpg
@@ -33,6 +34,9 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 _pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 _oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/token")
+# Variant for dual-auth routes (frontend JWT OR n8n webhook secret): missing
+# Authorization header yields None instead of an immediate 401.
+oauth2_scheme_optional = OAuth2PasswordBearer(tokenUrl="/auth/token", auto_error=False)
 
 
 @dataclass
@@ -162,3 +166,54 @@ async def me(current_user: CurrentUser = Depends(get_current_user)):
         "client_id": str(current_user.client_id),
         "role": current_user.role,
     }
+
+
+# ---------------------------------------------------------------------------
+# n8n server-to-server auth (CLAUDE.md §13 — webhook auth via N8N_WEBHOOK_SECRET)
+# ---------------------------------------------------------------------------
+
+def verify_n8n_secret(provided: str | None) -> None:
+    """
+    Validate the X-N8N-Webhook-Secret header value for n8n-facing routes.
+    Raises 401 when the secret is unset server-side, missing, or wrong —
+    n8n endpoints must never be anonymously reachable (CLAUDE.md §13/§14).
+    """
+    expected = settings.n8n_webhook_secret
+    if not expected or provided is None or not compare_digest(provided, expected):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Unauthorized.",
+        )
+
+
+async def resolve_service_client(client_id_raw: object) -> UUID:
+    """
+    Resolve the explicit client_id an n8n workflow passes in the request body
+    (§6: background/service work always operates under an explicit client_id).
+    Only callable after verify_n8n_secret. 422 on malformed id, 404 on
+    unknown/inactive client.
+    """
+    try:
+        client_id = UUID(str(client_id_raw))
+    except (ValueError, TypeError):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="A valid client_id is required.",
+        )
+
+    if _db.pool is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database unavailable.",
+        )
+
+    async with _db.pool.acquire() as conn:
+        is_active = await conn.fetchval(
+            "SELECT is_active FROM clients WHERE id = $1", client_id
+        )
+    if not is_active:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Unknown or inactive client.",
+        )
+    return client_id
