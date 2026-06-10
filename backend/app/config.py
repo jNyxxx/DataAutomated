@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     langchain_project: str = "dataautomated-dev"
 
     # ---- n8n / delivery / AWS (P6/P9) ----
+    n8n_webhook_url: str = ""  # e.g. http://n8n:5678 inside compose; blank disables dispatch
     n8n_webhook_secret: str = ""
     resend_api_key: str = ""
     aws_region: str = "us-east-1"

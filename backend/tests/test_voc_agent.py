@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import os
 import uuid as _uuid
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import asyncpg
 import pytest
@@ -185,34 +185,104 @@ async def test_churn_risk_formula_no_risk():
     assert result["churn_risk_score"] < 0.15
 
 
-async def test_check_alert_above_threshold():
-    from app.agents.voc_agent import check_alert_node, VoCState
-
-    state: VoCState = {
+def _alert_state(churn_risk: float, themes: list[dict] | None = None) -> dict:
+    return {
         "client_id": _uuid.uuid4(),
         "raw_feedback": [], "preprocessed": [],
-        "sentiment_results": [], "theme_clusters": [],
-        "churn_risk_score": 0.16,
+        "sentiment_results": [], "theme_clusters": themes or [],
+        "churn_risk_score": churn_risk,
         "narrative": "",
         "alert_required": False,
     }
-    result = check_alert_node(state)
+
+
+def _mock_httpx_client(post_side_effect=None):
+    """Mock httpx.AsyncClient usable as `async with` whose .post is an AsyncMock."""
+    client = MagicMock()
+    response = MagicMock()
+    response.raise_for_status = MagicMock()
+    client.post = AsyncMock(return_value=response, side_effect=post_side_effect)
+    cm = MagicMock()
+    cm.__aenter__ = AsyncMock(return_value=client)
+    cm.__aexit__ = AsyncMock(return_value=False)
+    return cm, client
+
+
+async def test_check_alert_above_threshold():
+    from app.agents.voc_agent import check_alert_node
+
+    # n8n_webhook_url defaults to "" → dispatch is skipped, no network involved.
+    result = await check_alert_node(_alert_state(0.16))
     assert result["alert_required"] is True
 
 
 async def test_check_alert_below_threshold():
-    from app.agents.voc_agent import check_alert_node, VoCState
+    from app.agents.voc_agent import check_alert_node
 
-    state: VoCState = {
-        "client_id": _uuid.uuid4(),
-        "raw_feedback": [], "preprocessed": [],
-        "sentiment_results": [], "theme_clusters": [],
-        "churn_risk_score": 0.14,
-        "narrative": "",
-        "alert_required": False,
-    }
-    result = check_alert_node(state)
+    result = await check_alert_node(_alert_state(0.14))
     assert result["alert_required"] is False
+
+
+async def test_check_alert_dispatches_n8n_webhook(monkeypatch):
+    """Above threshold + N8N_WEBHOOK_URL set → POST /webhook/churn-alert with the §13 payload."""
+    from app.agents.voc_agent import check_alert_node
+
+    monkeypatch.setattr(settings, "n8n_webhook_url", "http://n8n:5678")
+    monkeypatch.setattr(settings, "n8n_webhook_secret", "test-secret")
+
+    themes = [{"theme": "billing", "count": 7, "avg_sentiment": -0.6, "churn_signal_rate": 0.4}]
+    state = _alert_state(0.31, themes)
+    cm, client = _mock_httpx_client()
+    with patch("app.agents.voc_agent.httpx.AsyncClient", return_value=cm):
+        result = await check_alert_node(state)
+
+    assert result["alert_required"] is True
+    client.post.assert_awaited_once()
+    call = client.post.await_args
+    assert call.args[0] == "http://n8n:5678/webhook/churn-alert"
+    payload = call.kwargs["json"]
+    assert payload["client_id"] == str(state["client_id"])
+    assert payload["churn_risk_score"] == 0.31
+    assert payload["top_themes"] == themes
+    assert call.kwargs["headers"]["X-N8N-Webhook-Secret"] == "test-secret"
+
+
+async def test_check_alert_below_threshold_does_not_dispatch(monkeypatch):
+    from app.agents.voc_agent import check_alert_node
+
+    monkeypatch.setattr(settings, "n8n_webhook_url", "http://n8n:5678")
+    cm, client = _mock_httpx_client()
+    with patch("app.agents.voc_agent.httpx.AsyncClient", return_value=cm):
+        result = await check_alert_node(_alert_state(0.10))
+
+    assert result["alert_required"] is False
+    client.post.assert_not_awaited()
+
+
+async def test_check_alert_survives_webhook_failure(monkeypatch):
+    """Webhook delivery failure must never fail the agent run (graceful degradation)."""
+    from app.agents.voc_agent import check_alert_node
+
+    monkeypatch.setattr(settings, "n8n_webhook_url", "http://n8n:5678")
+    cm, client = _mock_httpx_client(post_side_effect=Exception("n8n unreachable"))
+    with patch("app.agents.voc_agent.httpx.AsyncClient", return_value=cm):
+        result = await check_alert_node(_alert_state(0.40))
+
+    assert result["alert_required"] is True  # alert state preserved despite delivery failure
+    client.post.assert_awaited_once()
+
+
+async def test_check_alert_skips_dispatch_when_url_unset(monkeypatch):
+    """Blank N8N_WEBHOOK_URL (local dev) → no HTTP attempt at all."""
+    from app.agents.voc_agent import check_alert_node
+
+    monkeypatch.setattr(settings, "n8n_webhook_url", "")
+    cm, client = _mock_httpx_client()
+    with patch("app.agents.voc_agent.httpx.AsyncClient", return_value=cm):
+        result = await check_alert_node(_alert_state(0.40))
+
+    assert result["alert_required"] is True
+    client.post.assert_not_awaited()
 
 
 async def test_sentiment_label_positive():

@@ -24,6 +24,7 @@ import logging
 from typing import Any, TypedDict
 from uuid import UUID
 
+import httpx
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 from langgraph.graph import END, StateGraph
@@ -208,8 +209,50 @@ async def narrative_generation_node(state: VoCState, llm: Any) -> dict:
     return {"narrative": narrative}
 
 
-def check_alert_node(state: VoCState) -> dict:
-    """Set alert_required when churn_risk_score > 0.15. n8n webhook wired in P6."""
+async def _dispatch_churn_alert(state: VoCState) -> None:
+    """
+    POST the churn alert to the n8n webhook (CLAUDE.md §13, Workflow 4).
+    n8n routes on churn_risk_score (>0.25 URGENT, >0.15 early warning).
+    Never raises — alert delivery must not fail the agent run; dispatch is
+    skipped (with a warning) when N8N_WEBHOOK_URL is unset (local dev without n8n).
+    """
+    if not settings.n8n_webhook_url:
+        logger.warning(
+            '{"event": "voc.churn_alert_skipped", "client_id": "%s", '
+            '"reason": "N8N_WEBHOOK_URL not configured"}',
+            state["client_id"],
+        )
+        return
+
+    payload = {
+        "client_id": str(state["client_id"]),
+        "churn_risk_score": state["churn_risk_score"],
+        "top_themes": state["theme_clusters"][:3],
+    }
+    headers = {}
+    if settings.n8n_webhook_secret:
+        headers["X-N8N-Webhook-Secret"] = settings.n8n_webhook_secret
+
+    url = f"{settings.n8n_webhook_url.rstrip('/')}/webhook/churn-alert"
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.post(url, json=payload, headers=headers)
+            response.raise_for_status()
+        logger.info(
+            '{"event": "voc.churn_alert_dispatched", "client_id": "%s", "churn_risk": %.3f}',
+            state["client_id"],
+            state["churn_risk_score"],
+        )
+    except Exception as exc:
+        logger.warning(
+            '{"event": "voc.churn_alert_dispatch_failed", "client_id": "%s", "error": "%s"}',
+            state["client_id"],
+            str(exc),
+        )
+
+
+async def check_alert_node(state: VoCState) -> dict:
+    """Set alert_required when churn_risk_score > 0.15 and fire the n8n churn webhook (§7.1)."""
     alert_required = state["churn_risk_score"] > 0.15
     if alert_required:
         logger.info(
@@ -217,6 +260,7 @@ def check_alert_node(state: VoCState) -> dict:
             state["client_id"],
             state["churn_risk_score"],
         )
+        await _dispatch_churn_alert(state)
     return {"alert_required": alert_required}
 
 
