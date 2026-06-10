@@ -1,10 +1,4 @@
-// Typed API client — the single data-access path to the FastAPI backend
-// (CLAUDE.md §11, FRONTEND_ARCHITECTURE.md §4). Every request sends a Bearer token;
-// any non-OK response throws. Full surface (fetchDashboardSummary, fetchInsights,
-// fetchSignals, triggerAnalysis, ...) is implemented in Phase 8.
-//
-// Auth note (D1): session/user management may be fronted by next-auth or Clerk, but the
-// client_id-bearing JWT contract is fixed regardless (MULTI_TENANT_SECURITY.md §5).
+import type { DashboardSummary, Insight, Journey, Signal } from './types';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
@@ -18,7 +12,47 @@ export async function apiRequest<T>(path: string, token?: string, init?: Request
     },
   });
   if (!res.ok) {
-    throw new Error(`API request failed: ${res.status} ${path}`);
+    throw new Error(`API ${res.status} ${path}`);
   }
   return res.json() as Promise<T>;
+}
+
+export async function login(email: string, password: string): Promise<string> {
+  const body = new URLSearchParams({ username: email, password });
+  const res = await fetch(`${API_URL}/auth/token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: body.toString(),
+  });
+  if (!res.ok) throw new Error('Invalid credentials');
+  const data = await res.json() as { access_token: string };
+  return data.access_token;
+}
+
+export async function fetchDashboardSummary(token: string): Promise<DashboardSummary> {
+  return apiRequest<DashboardSummary>('/api/dashboard/summary', token);
+}
+
+export async function fetchLatestInsight(token: string): Promise<{ insight: Insight | null }> {
+  return apiRequest<{ insight: Insight | null }>('/insights/latest', token);
+}
+
+export async function fetchSignals(token: string): Promise<{ signals: Signal[] }> {
+  return apiRequest<{ signals: Signal[] }>('/signals/latest', token);
+}
+
+export async function fetchJourneys(token: string): Promise<{ insights: Journey[] }> {
+  return apiRequest<{ insights: Journey[] }>('/journeys/latest', token);
+}
+
+export async function triggerAnalysis(
+  agent: 'voc' | 'signals' | 'journey',
+  token: string,
+): Promise<{ status: string }> {
+  const paths = {
+    voc: '/insights/analyze',
+    signals: '/signals/analyze',
+    journey: '/journeys/analyze',
+  };
+  return apiRequest<{ status: string }>(paths[agent], token, { method: 'POST' });
 }
