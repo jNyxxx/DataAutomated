@@ -1,68 +1,53 @@
 import { cookies } from 'next/headers';
-import Link from 'next/link';
 import { fetchLatestInsight } from '@/lib/api';
+import { MessageSquareText } from 'lucide-react';
+import InsightCard from './insight-card';
 
-function sentimentColor(label: string | null) {
-  if (label === 'positive') return 'text-green-700 bg-green-50 border-green-200';
-  if (label === 'negative') return 'text-red-700 bg-red-50 border-red-200';
-  if (label === 'mixed') return 'text-yellow-700 bg-yellow-50 border-yellow-200';
-  return 'text-gray-700 bg-gray-50 border-gray-200';
+function sentimentStyle(label: string | null): { bg: string; color: string; border: string } {
+  switch (label) {
+    case 'positive': return { bg: 'rgba(16,185,129,0.10)', color: '#34D399', border: 'rgba(16,185,129,0.22)' };
+    case 'negative': return { bg: 'rgba(239,68,68,0.10)',  color: '#F87171', border: 'rgba(239,68,68,0.22)' };
+    case 'mixed':    return { bg: 'rgba(245,158,11,0.10)', color: '#FBBF24', border: 'rgba(245,158,11,0.22)' };
+    default:         return { bg: 'rgba(100,116,139,0.10)',color: '#94A3B8', border: 'rgba(100,116,139,0.18)' };
+  }
 }
 
 export default async function InsightsPage() {
   const cookieStore = await cookies();
-  const token = cookieStore.get('token')!.value;
-  const res = await fetchLatestInsight(token).catch(() => null);
-  const insight = res?.insight ?? null;
+  const token       = cookieStore.get('token')!.value;
+  const res         = await fetchLatestInsight(token).catch(() => null);
+  const insight     = res?.insight ?? null;
 
   return (
-    <div className="p-6 space-y-6 max-w-4xl">
+    <div className="p-6 space-y-6 max-w-4xl page-enter">
+      {/* Header */}
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold">VoC Insights</h1>
+        <div>
+          <div className="flex items-center gap-2.5 mb-1">
+            <div
+              className="w-8 h-8 rounded-lg flex items-center justify-center"
+              style={{ background: 'rgba(99,102,241,0.12)', border: '1px solid rgba(99,102,241,0.20)' }}
+            >
+              <MessageSquareText size={16} style={{ color: '#818CF8' }} />
+            </div>
+            <h1 className="text-xl font-bold" style={{ color: '#F1F5F9' }}>
+              VoC Insights
+            </h1>
+          </div>
+          <p className="text-sm ml-10" style={{ color: '#475569' }}>
+            Voice-of-Customer analysis synthesized by AI
+          </p>
+        </div>
       </div>
 
+      {/* Insight card — client component for hover effects */}
       {insight ? (
-        <Link
-          href={`/insights/${insight.id}`}
-          className="block bg-white border border-gray-200 rounded-xl p-5 hover:border-indigo-300 transition-colors"
-        >
-          <div className="flex items-start justify-between gap-4">
-            <div className="space-y-2 flex-1">
-              <div className="flex items-center gap-2">
-                <span
-                  className={`text-xs font-medium px-2 py-0.5 rounded border ${sentimentColor(
-                    insight.sentiment_label,
-                  )}`}
-                >
-                  {insight.sentiment_label ?? 'unknown'}
-                </span>
-                {Number(insight.churn_risk) > 0.15 && (
-                  <span className="text-xs font-medium px-2 py-0.5 rounded border text-yellow-700 bg-yellow-50 border-yellow-200">
-                    Churn risk: {Number(insight.churn_risk).toFixed(2)}
-                  </span>
-                )}
-              </div>
-              {insight.narrative && (
-                <p className="text-sm text-gray-700 line-clamp-3">{insight.narrative}</p>
-              )}
-              <div className="text-xs text-gray-400">
-                {insight.period_start && insight.period_end
-                  ? `${insight.period_start.slice(0, 10)} → ${insight.period_end.slice(0, 10)}`
-                  : insight.created_at?.slice(0, 10)}
-              </div>
-            </div>
-            <div className="text-right shrink-0">
-              <div className="text-2xl font-bold text-gray-900">
-                {Number(insight.sentiment_score).toFixed(2)}
-              </div>
-              <div className="text-xs text-gray-400">sentiment</div>
-            </div>
-          </div>
-        </Link>
+        <InsightCard insight={insight} sentimentStyle={sentimentStyle(insight.sentiment_label)} />
       ) : (
-        <div className="bg-white border border-dashed border-gray-300 rounded-xl p-10 text-center">
-          <p className="text-gray-400 text-sm">No insights yet.</p>
-          <p className="text-gray-400 text-xs mt-1">Trigger a VoC analysis from the API to begin.</p>
+        <div className="empty-state">
+          <MessageSquareText size={32} className="mx-auto mb-3" style={{ color: '#334155' }} />
+          <p className="text-sm font-medium mb-1" style={{ color: '#475569' }}>No insights yet</p>
+          <p className="text-xs" style={{ color: '#334155' }}>Trigger a VoC analysis from the API to begin.</p>
         </div>
       )}
     </div>

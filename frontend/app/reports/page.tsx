@@ -1,6 +1,7 @@
 import { cookies } from 'next/headers';
 import { apiRequest } from '@/lib/api';
 import ReportTrigger from '@/components/report-trigger';
+import { FileBarChart2, Download } from 'lucide-react';
 
 interface Report {
   id: string;
@@ -13,60 +14,113 @@ interface Report {
 
 const reportTypeLabels: Record<string, string> = {
   weekly_intelligence: 'Weekly Intelligence',
-  competitive_brief: 'Competitive Brief',
-  journey: 'Journey Report',
+  competitive_brief:   'Competitive Brief',
+  journey:             'Journey Report',
+};
+
+const reportTypeBadge: Record<string, { bg: string; color: string; border: string }> = {
+  weekly_intelligence: { bg: 'rgba(99,102,241,0.10)', color: '#818CF8', border: 'rgba(99,102,241,0.22)' },
+  competitive_brief:   { bg: 'rgba(6,182,212,0.10)',  color: '#22D3EE', border: 'rgba(6,182,212,0.22)' },
+  journey:             { bg: 'rgba(139,92,246,0.10)', color: '#A78BFA', border: 'rgba(139,92,246,0.22)' },
 };
 
 export default async function ReportsPage() {
   const cookieStore = await cookies();
-  const token = cookieStore.get('token')!.value;
-  const res = await apiRequest<{ reports: Report[] }>('/api/reports/list', token).catch(() => null);
-  const reports = res?.reports ?? [];
+  const token       = cookieStore.get('token')!.value;
+  const res         = await apiRequest<{ reports: Report[] }>('/api/reports/list', token).catch(() => null);
+  const reports     = res?.reports ?? [];
 
   return (
-    <div className="p-6 space-y-5 max-w-4xl">
+    <div className="p-6 space-y-6 max-w-4xl page-enter">
+      {/* Header */}
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold">Reports</h1>
+        <div className="flex items-center gap-2.5">
+          <div
+            className="w-8 h-8 rounded-lg flex items-center justify-center"
+            style={{ background: 'rgba(99,102,241,0.12)', border: '1px solid rgba(99,102,241,0.20)' }}
+          >
+            <FileBarChart2 size={16} style={{ color: '#818CF8' }} />
+          </div>
+          <div>
+            <h1 className="text-xl font-bold" style={{ color: '#F1F5F9' }}>Reports</h1>
+            <p className="text-sm" style={{ color: '#475569' }}>
+              Generated weekly, or on-demand
+            </p>
+          </div>
+        </div>
         <ReportTrigger token={token} />
       </div>
 
+      {/* Reports table */}
       {reports.length > 0 ? (
-        <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50 border-b border-gray-200">
+        <div
+          className="rounded-xl overflow-hidden"
+          style={{ border: '1px solid rgba(148,163,184,0.09)' }}
+        >
+          <table className="w-full table-dark">
+            <thead>
               <tr>
-                <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wide">Type</th>
-                <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wide">Period</th>
-                <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wide">Generated</th>
-                <th className="px-4 py-3"></th>
+                <th className="text-left">Type</th>
+                <th className="text-left">Period</th>
+                <th className="text-left">Generated</th>
+                <th className="text-right">File</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-100">
-              {reports.map((r) => (
-                <tr key={r.id} className="hover:bg-gray-50">
-                  <td className="px-4 py-3 font-medium text-gray-900">
-                    {reportTypeLabels[r.report_type ?? ''] ?? r.report_type ?? '—'}
-                  </td>
-                  <td className="px-4 py-3 text-gray-500">
-                    {r.period_start?.slice(0, 10)} → {r.period_end?.slice(0, 10)}
-                  </td>
-                  <td className="px-4 py-3 text-gray-500">
-                    {r.created_at?.slice(0, 10)}
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    {r.s3_key && (
-                      <span className="text-xs text-indigo-600 font-medium">PDF ready</span>
-                    )}
-                  </td>
-                </tr>
-              ))}
+            <tbody>
+              {reports.map((r) => {
+                const badge = reportTypeBadge[r.report_type ?? ''] ?? {
+                  bg: 'rgba(100,116,139,0.10)', color: '#94A3B8', border: 'rgba(100,116,139,0.18)',
+                };
+                return (
+                  <tr key={r.id}>
+                    <td>
+                      <span
+                        className="inline-flex items-center text-xs font-medium px-2 py-0.5 rounded-md"
+                        style={{ background: badge.bg, color: badge.color, border: `1px solid ${badge.border}` }}
+                      >
+                        {reportTypeLabels[r.report_type ?? ''] ?? r.report_type ?? '—'}
+                      </span>
+                    </td>
+                    <td className="tabular-nums">
+                      {r.period_start?.slice(0, 10)}{' '}
+                      <span style={{ color: '#334155' }}>→</span>{' '}
+                      {r.period_end?.slice(0, 10)}
+                    </td>
+                    <td className="tabular-nums">
+                      {r.created_at?.slice(0, 10)}
+                    </td>
+                    <td className="text-right">
+                      {r.s3_key ? (
+                        <span
+                          className="inline-flex items-center gap-1.5 text-xs font-medium px-2 py-0.5 rounded-md"
+                          style={{
+                            background: 'rgba(16,185,129,0.10)',
+                            color: '#34D399',
+                            border: '1px solid rgba(16,185,129,0.20)',
+                          }}
+                        >
+                          <Download size={11} />
+                          PDF ready
+                        </span>
+                      ) : (
+                        <span style={{ color: '#334155', fontSize: 12 }}>Pending</span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
       ) : (
-        <div className="bg-white border border-dashed border-gray-300 rounded-xl p-10 text-center">
-          <p className="text-gray-400 text-sm mb-3">No reports generated yet.</p>
-          <p className="text-gray-400 text-xs">Reports are generated automatically every Monday. You can also trigger one manually above.</p>
+        <div className="empty-state">
+          <FileBarChart2 size={32} className="mx-auto mb-3" style={{ color: '#334155' }} />
+          <p className="text-sm font-medium mb-1" style={{ color: '#475569' }}>
+            No reports generated yet
+          </p>
+          <p className="text-xs" style={{ color: '#334155' }}>
+            Reports run automatically every Monday, or generate one above.
+          </p>
         </div>
       )}
     </div>
