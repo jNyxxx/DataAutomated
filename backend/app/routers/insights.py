@@ -17,10 +17,10 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from typing import Any, Optional
+from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Header
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, Query
 from fastapi.responses import StreamingResponse
 
 from app.config import settings
@@ -110,38 +110,55 @@ async def latest(current_user: CurrentUser = Depends(get_current_user)):
 # /stream/insights — SSE (CLAUDE.md §12)
 # ---------------------------------------------------------------------------
 
+async def _fetch_insights_since(conn, client_id: UUID, since) -> list:
+    """
+    Rows created strictly after the `since` watermark, oldest-first.
+
+    The watermark is `created_at` (not the previously-emitted id): with an id
+    watermark, once the newest row is emitted the query "latest row whose id is
+    not the last one" returns the SECOND-newest (an old row) and the stream then
+    oscillates between the two newest rows forever.  A monotonic created_at
+    watermark only ever advances, so each row is emitted exactly once.
+    """
+    return await conn.fetch(
+        "SELECT id, narrative, churn_risk, created_at "
+        "FROM feedback_insights "
+        "WHERE client_id = $1 AND created_at > $2 "
+        "ORDER BY created_at ASC",
+        client_id, since,
+    )
+
+
 @_extra.get("/stream/insights", summary="SSE stream of new VoC insights")
-async def stream_insights(current_user: CurrentUser = Depends(get_current_user)):
+async def stream_insights(token: str = Query(..., description="JWT bearer; EventSource cannot set headers")):
     """
-    Server-Sent Events stream.  Polls feedback_insights every 5 seconds and pushes
-    new rows as they appear.  Client closes the EventSource to stop receiving.
+    Server-Sent Events stream (CLAUDE.md §12).  Polls feedback_insights every 5s
+    and pushes rows created after connect.  Client closes the EventSource to stop.
+
+    Auth: the token is taken from the query string because the browser EventSource
+    API cannot set an Authorization header.  It is validated by get_current_user
+    exactly like a bearer token (401 on failure).
+    SECURITY NOTE: a JWT in the URL can leak into access logs / proxies; acceptable
+    for the local/MVP cross-origin setup, but in production (same-origin via
+    CloudFront/ALB) prefer a cookie or a short-lived single-use SSE ticket.
     """
+    current_user = await get_current_user(token)
+
     async def _generator():
-        last_id: Optional[UUID] = None
+        # Seed the watermark to "now" so a fresh connection does not replay history.
+        async with acquire_for_client(current_user.client_id) as conn:
+            last_seen = await conn.fetchval(
+                "SELECT COALESCE(MAX(created_at), NOW()) "
+                "FROM feedback_insights WHERE client_id = $1",
+                current_user.client_id,
+            )
         while True:
             async with acquire_for_client(current_user.client_id) as conn:
-                if last_id is None:
-                    row = await conn.fetchrow(
-                        "SELECT id, narrative, churn_risk, created_at "
-                        "FROM feedback_insights "
-                        "WHERE client_id = $1 "
-                        "ORDER BY created_at DESC LIMIT 1",
-                        current_user.client_id,
-                    )
-                else:
-                    row = await conn.fetchrow(
-                        "SELECT id, narrative, churn_risk, created_at "
-                        "FROM feedback_insights "
-                        "WHERE client_id = $1 AND id != $2 "
-                        "ORDER BY created_at DESC LIMIT 1",
-                        current_user.client_id, last_id,
-                    )
-            if row:
-                row_id = row["id"]
-                if row_id != last_id:
-                    last_id = row_id
-                    payload = {k: str(v) if v is not None else None for k, v in dict(row).items()}
-                    yield f"data: {json.dumps(payload)}\n\n"
+                rows = await _fetch_insights_since(conn, current_user.client_id, last_seen)
+            for row in rows:
+                last_seen = row["created_at"]
+                payload = {k: str(v) if v is not None else None for k, v in dict(row).items()}
+                yield f"data: {json.dumps(payload)}\n\n"
             await asyncio.sleep(5)
 
     return StreamingResponse(_generator(), media_type="text/event-stream")
