@@ -4,11 +4,10 @@ Competitive Signal agent (CLAUDE.md §7.2; AGENT_ARCHITECTURE.md §3.2).
 Graph: fetch_competitors -> mine_signals -> classify_signals
        -> generate_strategic_context -> flag_critical -> store -> END
 
-Phase 4b scope: the full StateGraph is implemented. The external signal-mining step
-(`mine_signals_node`) is a **Phase 5 stub** — it returns no signals and logs a warning,
-because the MCP scraping/search tools (G2, news, LinkedIn, …) are not built until P5.
-Every other node is real: a client with mined signals would flow cleanly through
-classification, strategic-context generation, critical flagging, and persistence.
+Phase 4b + Phase 5: the full StateGraph is implemented.  mine_signals_node now resolves
+the client's connected CompSig MCP tools via get_tools_for_client (registry.py) and fans
+them out concurrently, mapping normalized tool output to raw_signals.  Individual tool
+failures are tolerated — a partial result is still passed downstream.
 
 Tenant contract (CLAUDE §6; MULTI_TENANT_SECURITY §4):
   - All DB access goes through acquire_for_client() — never asyncpg.connect().
@@ -26,6 +25,7 @@ Observability (NFR-03): entry point is @traceable so every run appears in LangSm
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from typing import Any, Literal, TypedDict
@@ -39,6 +39,7 @@ from pydantic import BaseModel, ValidationError
 
 from app.config import settings
 from app.database import acquire_for_client
+from app.tools.registry import get_tools_for_client
 
 logger = logging.getLogger("dataautomated")
 
@@ -106,20 +107,67 @@ async def fetch_competitors_node(state: CompSignalState) -> dict:
 
 async def mine_signals_node(state: CompSignalState) -> dict:
     """
-    Mine multimodal competitor signals via MCP tools.
+    Mine competitor signals via connected CompSig MCP tools (Phase 5).
 
-    PHASE 5 STUB — the scraping/search tools (scrape_g2_reviews, search_news_signals,
-    fetch_linkedin_jobs, …) do not exist yet. This node returns NO signals so real runs
-    persist nothing fabricated. Once P5 lands, this node resolves the client's connected
-    sources via get_tools_for_client() and aggregates normalized signals.
+    Resolves the client's active CompSig tools from the registry, fans them out
+    concurrently, and maps normalized tool output to raw_signals format.
+    Individual tool failures are logged and skipped — partial results still flow
+    downstream (graceful degradation per RISK-10; MCP_ARCHITECTURE §7).
     """
-    logger.warning(
-        "mine_signals is a Phase 5 stub — MCP tools not yet implemented; "
-        "returning empty signals for client %s (%d competitors tracked)",
-        state["client_id"],
-        len(state["competitors"]),
+    if not state["competitors"]:
+        logger.info(
+            '{"event":"compsig.mine_signals.skip","reason":"no_competitors","client_id":"%s"}',
+            state["client_id"],
+        )
+        return {"raw_signals": []}
+
+    try:
+        tools = await get_tools_for_client(state["client_id"], category="compsig")
+    except Exception as exc:
+        logger.warning(
+            "mine_signals: registry lookup failed for client %s: %s",
+            state["client_id"], exc,
+        )
+        return {"raw_signals": []}
+
+    if not tools:
+        logger.info(
+            '{"event":"compsig.mine_signals.skip","reason":"no_tools","client_id":"%s"}',
+            state["client_id"],
+        )
+        return {"raw_signals": []}
+
+    competitor_names = [c["name"] for c in state["competitors"]]
+    tool_input = {"client_id": state["client_id"], "competitors": competitor_names}
+
+    results = await asyncio.gather(
+        *[tool.arun(tool_input) for tool in tools],
+        return_exceptions=True,
     )
-    return {"raw_signals": []}
+
+    raw_signals: list[dict] = []
+    for tool, result in zip(tools, results):
+        if isinstance(result, Exception):
+            logger.warning(
+                "mine_signals: tool %s failed for client %s: %s",
+                tool.name, state["client_id"], result,
+            )
+            continue
+        if not isinstance(result, list):
+            continue
+        for item in result:
+            meta = item.get("metadata") or {}
+            raw_signals.append({
+                "competitor_name": meta.get("competitor_name", "unknown"),
+                "signal_source":   meta.get("signal_source", item.get("id", tool.name)),
+                "raw_content":     item.get("content", ""),
+            })
+
+    logger.info(
+        '{"event":"compsig.mine_signals","client_id":"%s","tools":%d,"signals":%d}',
+        state["client_id"], len(tools), len(raw_signals),
+    )
+    return {"raw_signals": raw_signals}
 
 
 def _build_classify_messages(signals: list[dict]) -> list:
