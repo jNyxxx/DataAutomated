@@ -69,6 +69,7 @@
         },
         "sendBody": true,
         "bodyContentType": "json",
+        "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ client_id: $json.id }) }}",
         "options": {}
       },
@@ -126,7 +127,8 @@
         },
         "sendBody": true,
         "bodyContentType": "json",
-        "jsonBody": "={{ JSON.stringify({ client_id: $('Trigger Ingest').item.json.client_id }) }}",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ client_id: $('Split Clients').item.json.id }) }}",
         "options": {}
       },
       "id": "a1b2c3d4-0001-0001-0001-000000000006",

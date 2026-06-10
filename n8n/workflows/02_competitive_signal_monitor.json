@@ -69,6 +69,7 @@
         },
         "sendBody": true,
         "bodyContentType": "json",
+        "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ client_id: $json.id }) }}",
         "options": {}
       },
@@ -191,6 +192,7 @@
         },
         "sendBody": true,
         "bodyContentType": "json",
+        "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({\n  from: 'DataAutomated <alerts@dataautomated.io>',\n  to: [$('Split Clients').item.json.email],\n  subject: '🚨 Critical Competitive Signal: ' + $json.competitor_name,\n  html: '<h2>Critical Competitive Signal Detected</h2><p><strong>Competitor:</strong> ' + $json.competitor_name + '</p><p><strong>Signal Type:</strong> ' + $json.signal_type + '</p><p><strong>Strategic Context:</strong><br>' + $json.strategic_context + '</p><p>Log in to your DataAutomated dashboard to view the full analysis.</p>'\n}) }}",
         "options": {}
       },
