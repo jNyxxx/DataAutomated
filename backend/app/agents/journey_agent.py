@@ -37,6 +37,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 from app.config import settings
 from app.database import acquire_for_client
+from app.services.audit_service import record_audit
 
 logger = logging.getLogger("dataautomated")
 
@@ -323,6 +324,13 @@ async def store_node(state: JourneyState) -> dict:
         '{"event": "journey.stored", "client_id": "%s", "count": %d}',
         state["client_id"],
         len(recommendations),
+    )
+    await record_audit(
+        "agent.store",
+        client_id=state["client_id"],
+        actor="journey_agent",
+        resource="journey_insights",
+        detail={"count": len(recommendations)},
     )
     return {}
 

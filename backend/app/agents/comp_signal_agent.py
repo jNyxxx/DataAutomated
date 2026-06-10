@@ -39,6 +39,7 @@ from pydantic import BaseModel, ValidationError
 
 from app.config import settings
 from app.database import acquire_for_client
+from app.services.audit_service import record_audit
 from app.tools.registry import get_tools_for_client
 
 logger = logging.getLogger("dataautomated")
@@ -326,6 +327,13 @@ async def store_node(state: CompSignalState) -> dict:
         '{"event": "compsig.stored", "client_id": "%s", "count": %d}',
         state["client_id"],
         len(signals),
+    )
+    await record_audit(
+        "agent.store",
+        client_id=state["client_id"],
+        actor="comp_signal_agent",
+        resource="competitive_signals",
+        detail={"count": len(signals)},
     )
     return {}
 

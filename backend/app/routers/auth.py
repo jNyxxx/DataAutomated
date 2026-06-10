@@ -27,6 +27,7 @@ from passlib.context import CryptContext
 
 import app.database as _db
 from app.config import settings
+from app.services.audit_service import record_audit
 
 logger = logging.getLogger("dataautomated")
 
@@ -87,6 +88,12 @@ async def login(form: OAuth2PasswordRequestForm = Depends()):
             '{"event": "auth.failure", "reason": "invalid_credentials", "username": "%s"}',
             form.username,
         )
+        await record_audit(
+            "auth.failure",
+            actor=form.username,
+            resource="POST /auth/token",
+            detail={"reason": "invalid_credentials"},
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect credentials.",
@@ -101,6 +108,12 @@ async def login(form: OAuth2PasswordRequestForm = Depends()):
         '{"event": "auth.login", "user_id": "%s", "client_id": "%s"}',
         row["id"],
         row["client_id"],
+    )
+    await record_audit(
+        "auth.login",
+        client_id=row["client_id"],
+        actor=str(row["id"]),
+        resource="POST /auth/token",
     )
     return {"access_token": token, "token_type": "bearer"}
 

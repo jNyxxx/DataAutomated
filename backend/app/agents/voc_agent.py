@@ -32,6 +32,7 @@ from langsmith import traceable
 
 from app.config import settings
 from app.database import acquire_for_client
+from app.services.audit_service import record_audit
 from app.services.embedding_service import retrieve_similar
 from app.services.nlp_service import NLPResult, extract_feedback_batch
 
@@ -333,6 +334,13 @@ async def store_results_node(state: VoCState) -> dict:
         state["client_id"],
         len(feedback_ids),
         state["churn_risk_score"],
+    )
+    await record_audit(
+        "agent.store",
+        client_id=state["client_id"],
+        actor="voc_agent",
+        resource="feedback_insights",
+        detail={"items": len(feedback_ids), "churn_risk": state["churn_risk_score"]},
     )
     return {}
 

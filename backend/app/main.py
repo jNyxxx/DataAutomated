@@ -18,6 +18,7 @@ from typing import Any
 
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
+from jose import JWTError, jwt
 
 import app.database as _db
 from app.config import settings
@@ -30,6 +31,7 @@ from app.routers.auth import (
     resolve_service_client,
     verify_n8n_secret,
 )
+from app.services.audit_service import record_audit
 
 
 @asynccontextmanager
@@ -37,6 +39,83 @@ async def lifespan(app: FastAPI):
     await init_pool()
     yield
     await close_pool()
+
+
+# ---- Audit middleware (CLAUDE.md §14 — complete trail of all data access) ----
+
+# Liveness/docs are noise; SSE streams stay open for the client's session, so the
+# post-response hook would only fire at disconnect — streams are exempt instead.
+_AUDIT_EXEMPT_PATHS = {"/", "/health", "/docs", "/docs/oauth2-redirect", "/openapi.json", "/redoc"}
+
+
+def _audit_identity(scope: dict) -> tuple[str | None, object]:
+    """
+    Best-effort (actor, client_id) from request headers for the audit row.
+    The JWT is verified (HS256) before its claims are trusted; an n8n call is
+    identified by the presence of the webhook-secret header (route-level auth
+    decides validity — the recorded status code reflects rejections).
+    """
+    headers = {k.lower(): v for k, v in scope.get("headers", [])}  # bytes -> bytes
+    auth_header = headers.get(b"authorization", b"").decode("latin-1")
+    if auth_header.lower().startswith("bearer "):
+        try:
+            claims = jwt.decode(
+                auth_header[7:],
+                settings.jwt_secret_key,
+                algorithms=[settings.jwt_algorithm],
+            )
+            return claims.get("sub"), claims.get("client_id")
+        except JWTError:
+            return None, None
+    if b"x-n8n-webhook-secret" in headers:
+        return "n8n", None
+    return None, None
+
+
+class AuditMiddleware:
+    """
+    Pure ASGI middleware (not BaseHTTPMiddleware, so streaming responses are not
+    re-wrapped) that appends one audit_log row per API request after the response
+    completes. Write failures are swallowed inside record_audit — auditing must
+    never take a request down with it.
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if (
+            scope["type"] != "http"
+            or scope.get("method") == "OPTIONS"
+            or scope.get("path") in _AUDIT_EXEMPT_PATHS
+            or scope.get("path", "").startswith("/stream/")
+        ):
+            return await self.app(scope, receive, send)
+
+        status_holder: dict[str, int | None] = {"status": None}
+
+        async def _send(message):
+            if message["type"] == "http.response.start":
+                status_holder["status"] = message["status"]
+            await send(message)
+
+        try:
+            await self.app(scope, receive, _send)
+        finally:
+            actor, claim_client_id = _audit_identity(scope)
+            try:
+                from uuid import UUID as _UUID
+
+                client_id = _UUID(str(claim_client_id)) if claim_client_id else None
+            except ValueError:
+                client_id = None
+            await record_audit(
+                "http.request",
+                client_id=client_id,
+                actor=actor,
+                resource=f"{scope.get('method')} {scope.get('path')}",
+                detail={"status": status_holder["status"]},
+            )
 
 
 app = FastAPI(
@@ -53,6 +132,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Audit trail — every non-exempt API request lands in audit_log (§14).
+app.add_middleware(AuditMiddleware)
 
 # ---- Routers (CLAUDE.md §10 prefixes / tags) ----
 app.include_router(auth.router)         # /auth   — Authentication

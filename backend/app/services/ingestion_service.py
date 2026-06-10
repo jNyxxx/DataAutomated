@@ -34,6 +34,7 @@ from typing import Any
 from uuid import UUID
 
 from app.database import acquire_for_client
+from app.services.audit_service import record_audit
 from app.tools.registry import TOOL_REGISTRY
 
 logger = logging.getLogger("dataautomated")
@@ -179,6 +180,17 @@ async def run_ingestion(client_id: UUID) -> dict:
         '{"event": "ingestion.complete", "client_id": "%s", '
         '"ingestion_count": %d, "journey_event_count": %d, "sources": %d}',
         client_id, feedback_count, event_count, len(processed),
+    )
+    await record_audit(
+        "ingest.run",
+        client_id=client_id,
+        actor="ingestion_service",
+        resource="raw_feedback,journey_events",
+        detail={
+            "ingestion_count": feedback_count,
+            "journey_event_count": event_count,
+            "sources": processed,
+        },
     )
     return {
         "ingestion_count": feedback_count,
