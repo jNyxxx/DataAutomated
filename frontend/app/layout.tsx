@@ -3,7 +3,7 @@ import { Inter } from 'next/font/google';
 import './globals.css';
 import Nav from '@/components/nav';
 import SseWatcher from '@/components/sse-watcher';
-import { cookies } from 'next/headers';
+import { cookies, headers } from 'next/headers';
 
 const inter = Inter({
   subsets: ['latin'],
@@ -21,7 +21,11 @@ export const metadata: Metadata = {
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const cookieStore = await cookies();
   const token = cookieStore.get('token')?.value;
-  const showNav = !!token;
+  
+  const headerList = await headers();
+  const pathname = headerList.get('x-pathname') || '';
+  const isLoginPage = pathname === '/login';
+  const showNav = !!token && !isLoginPage;
 
   return (
     <html lang="en" className={inter.variable}>

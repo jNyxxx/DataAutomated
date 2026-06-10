@@ -1,21 +1,31 @@
 'use client';
 
 import { useState } from 'react';
-import { CheckCircle, XCircle } from 'lucide-react';
+import { CheckCircle, XCircle, CheckCheck } from 'lucide-react';
 
 interface Props {
   token: string;
   categories: Record<string, string[]>;
   sourceLabels: Record<string, string>;
+  /** Active source types this client has already connected — these buttons are disabled. */
+  connectedTypes?: string[];
 }
 
-export default function DataSourceManager({ token, categories, sourceLabels }: Props) {
+export default function DataSourceManager({ token, categories, sourceLabels, connectedTypes = [] }: Props) {
   const [sourceType, setSourceType] = useState('');
   const [status, setStatus]         = useState<'idle' | 'loading' | 'done' | 'error'>('idle');
   const [errorMsg, setErrorMsg]     = useState('');
 
+  const connectedSet = new Set(connectedTypes);
+
   async function connect() {
     if (!sourceType) return;
+    // Client-side guard — mirrors the backend 409 constraint.
+    if (connectedSet.has(sourceType)) {
+      setErrorMsg(`${sourceLabels[sourceType] ?? sourceType} is already connected.`);
+      setStatus('error');
+      return;
+    }
     setStatus('loading');
     setErrorMsg('');
     try {
@@ -29,6 +39,7 @@ export default function DataSourceManager({ token, categories, sourceLabels }: P
       });
       if (!res.ok) {
         const data = await res.json() as { detail?: string };
+        // Surface the backend 409 message directly — it is already user-friendly.
         setErrorMsg(data.detail ?? 'Connection failed');
         setStatus('error');
         return;
@@ -52,6 +63,7 @@ export default function DataSourceManager({ token, categories, sourceLabels }: P
     >
       <p className="text-xs" style={{ color: '#64748B' }}>
         Select an integration type to connect. You will configure credentials after the initial connection.
+        Each source type can only be connected once.
       </p>
 
       {/* Category groups */}
@@ -66,22 +78,52 @@ export default function DataSourceManager({ token, categories, sourceLabels }: P
             </div>
             <div className="flex flex-wrap gap-2">
               {types.map((type) => {
-                const isSelected = sourceType === type;
+                const isConnected = connectedSet.has(type);
+                const isSelected  = sourceType === type;
                 return (
                   <button
                     key={type}
-                    onClick={() => setSourceType(type === sourceType ? '' : type)}
-                    className="px-3 py-1.5 rounded-lg text-sm transition-all duration-150"
-                    style={{
-                      background: isSelected ? 'rgba(99,102,241,0.15)' : 'rgba(255,255,255,0.03)',
-                      border: isSelected
-                        ? '1px solid rgba(99,102,241,0.45)'
-                        : '1px solid rgba(148,163,184,0.11)',
-                      color: isSelected ? '#A5B4FC' : '#94A3B8',
-                      boxShadow: isSelected ? '0 0 12px rgba(99,102,241,0.15)' : 'none',
+                    onClick={() => {
+                      if (!isConnected) setSourceType(type === sourceType ? '' : type);
                     }}
+                    disabled={isConnected}
+                    title={isConnected ? `${sourceLabels[type] ?? type} is already connected` : undefined}
+                    className="px-3 py-1.5 rounded-lg text-sm transition-all duration-150 flex items-center gap-1.5"
+                    style={
+                      isConnected
+                        ? {
+                            background: 'rgba(16,185,129,0.07)',
+                            border: '1px solid rgba(16,185,129,0.20)',
+                            color: '#34D399',
+                            cursor: 'not-allowed',
+                            opacity: 0.75,
+                          }
+                        : isSelected
+                        ? {
+                            background: 'rgba(99,102,241,0.15)',
+                            border: '1px solid rgba(99,102,241,0.45)',
+                            color: '#A5B4FC',
+                            boxShadow: '0 0 12px rgba(99,102,241,0.15)',
+                            cursor: 'pointer',
+                          }
+                        : {
+                            background: 'rgba(255,255,255,0.03)',
+                            border: '1px solid rgba(148,163,184,0.11)',
+                            color: '#94A3B8',
+                            cursor: 'pointer',
+                          }
+                    }
                   >
+                    {isConnected && <CheckCheck size={12} />}
                     {sourceLabels[type] ?? type}
+                    {isConnected && (
+                      <span
+                        className="ml-1 text-[10px] font-semibold uppercase tracking-wide"
+                        style={{ color: 'rgba(52,211,153,0.7)' }}
+                      >
+                        Connected
+                      </span>
+                    )}
                   </button>
                 );
               })}
@@ -91,7 +133,7 @@ export default function DataSourceManager({ token, categories, sourceLabels }: P
       </div>
 
       {/* Connect action */}
-      {sourceType && (
+      {sourceType && !connectedSet.has(sourceType) && (
         <div
           className="pt-4 flex items-center gap-3"
           style={{ borderTop: '1px solid rgba(148,163,184,0.08)' }}

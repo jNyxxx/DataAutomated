@@ -156,7 +156,12 @@ export default async function SettingsPage() {
             Connect a New Source
           </h2>
         </div>
-        <DataSourceManager token={token} categories={SOURCE_CATEGORIES} sourceLabels={SOURCE_LABELS} />
+        <DataSourceManager
+          token={token}
+          categories={SOURCE_CATEGORIES}
+          sourceLabels={SOURCE_LABELS}
+          connectedTypes={sources.filter((s) => s.is_active).map((s) => s.source_type)}
+        />
       </section>
     </div>
   );
