@@ -8,6 +8,14 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
+# WeasyPrint (PDF reports) needs Pango/HarfBuzz native libs + fonts (CLAUDE.md §13 W3).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libpango-1.0-0 \
+        libpangoft2-1.0-0 \
+        libharfbuzz-subset0 \
+        fonts-dejavu-core \
+    && rm -rf /var/lib/apt/lists/*
+
 # Install dependencies first for layer caching.
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt

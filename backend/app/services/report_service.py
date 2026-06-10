@@ -210,8 +210,10 @@ def _html_to_pdf(html: str) -> bytes:
     try:
         from weasyprint import HTML
         return HTML(string=html).write_pdf()
-    except ImportError:
-        logger.warning("WeasyPrint not installed; returning HTML bytes as fallback")
+    except (ImportError, OSError) as exc:
+        # OSError: WeasyPrint is pip-installed but native libs (pango/harfbuzz)
+        # are missing from the host — same degradation path as not installed.
+        logger.warning("WeasyPrint unavailable (%s); returning HTML bytes as fallback", exc)
         return html.encode("utf-8")
 
 
