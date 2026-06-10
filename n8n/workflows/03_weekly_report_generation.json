@@ -1,0 +1,194 @@
+{
+  "name": "03 — Weekly Report Generation",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "weeks",
+              "weeksInterval": 1,
+              "triggerAtDay": [1],
+              "triggerAtHour": 9,
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      },
+      "id": "a3b4c5d6-0003-0003-0003-000000000001",
+      "name": "Monday 9 AM",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{$env.BACKEND_URL}}/api/clients/active-list",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-N8N-Webhook-Secret",
+              "value": "={{$env.N8N_WEBHOOK_SECRET}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a3b4c5d6-0003-0003-0003-000000000002",
+      "name": "Get Active Clients",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "clients",
+        "options": {}
+      },
+      "id": "a3b4c5d6-0003-0003-0003-000000000003",
+      "name": "Split Clients",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.BACKEND_URL}}/api/reports/generate",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$env.N8N_SERVICE_TOKEN}}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyContentType": "json",
+        "jsonBody": "={{ JSON.stringify({\n  client_id: $json.id,\n  report_type: 'weekly_intelligence',\n  period: 'last_7_days'\n}) }}",
+        "options": {}
+      },
+      "id": "a3b4c5d6-0003-0003-0003-000000000004",
+      "name": "Generate Report",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-s3-url",
+              "leftValue": "={{ $json.s3_url }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a3b4c5d6-0003-0003-0003-000000000005",
+      "name": "Report Ready?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1120, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.resend.com/emails",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$env.RESEND_API_KEY}}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyContentType": "json",
+        "jsonBody": "={{ JSON.stringify({\n  from: 'DataAutomated <reports@dataautomated.io>',\n  to: [$('Split Clients').item.json.email],\n  subject: '📊 Your Weekly Intelligence Report — ' + new Date().toISOString().slice(0,10),\n  html: '<h2>Your Weekly Intelligence Report is Ready</h2><p>Hi ' + $('Split Clients').item.json.name + ',</p><p>Your weekly intelligence briefing covering the past 7 days is now available.</p><p><a href=\"' + $json.s3_url + '\" style=\"background:#4f46e5;color:white;padding:12px 24px;border-radius:6px;text-decoration:none;display:inline-block;\">Download Report</a></p><p>You can also view your live dashboard at <a href=\"https://app.dataautomated.io/dashboard\">app.dataautomated.io</a>.</p>'\n}) }}",
+        "options": {}
+      },
+      "id": "a3b4c5d6-0003-0003-0003-000000000006",
+      "name": "Send Weekly Briefing",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1340, 200]
+    },
+    {
+      "parameters": {},
+      "id": "a3b4c5d6-0003-0003-0003-000000000007",
+      "name": "Report Pending",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [1340, 420]
+    }
+  ],
+  "connections": {
+    "Monday 9 AM": {
+      "main": [
+        [{"node": "Get Active Clients", "type": "main", "index": 0}]
+      ]
+    },
+    "Get Active Clients": {
+      "main": [
+        [{"node": "Split Clients", "type": "main", "index": 0}]
+      ]
+    },
+    "Split Clients": {
+      "main": [
+        [{"node": "Generate Report", "type": "main", "index": 0}]
+      ]
+    },
+    "Generate Report": {
+      "main": [
+        [{"node": "Report Ready?", "type": "main", "index": 0}]
+      ]
+    },
+    "Report Ready?": {
+      "main": [
+        [{"node": "Send Weekly Briefing", "type": "main", "index": 0}],
+        [{"node": "Report Pending", "type": "main", "index": 0}]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "pinData": {},
+  "versionId": "a3b4c5d6-0003-0003-0003-000000000000",
+  "meta": {
+    "instanceId": "dataautomated-local"
+  },
+  "id": "wf-weekly-report-generation",
+  "tags": [
+    {"id": "tag-reports", "name": "reports"},
+    {"id": "tag-delivery", "name": "delivery"}
+  ]
+}

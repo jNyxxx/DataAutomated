@@ -41,6 +41,8 @@ langchain-openai>=1.2,<2.0
 langsmith>=0.8,<1.0
 openai>=2.41,<3.0
 
-# ---- Added in later phases (kept here as a reference, commented to preserve build order) ----
-# resend                                                      # P6 (delivery)
-# weasyprint                                                  # P6/P9 (PDF; needs system libs)
+# ---- Phase 6 deps (reports + delivery) ----
+resend>=2.3,<3.0                                             # P6: email delivery
+weasyprint>=62.0                                             # P6/P9: PDF generation (requires system libs: pango cairo)
+jinja2>=3.1,<4.0                                             # P6: HTML report templates
+boto3>=1.34,<2.0                                             # P6/P9: S3 uploads + Secrets Manager

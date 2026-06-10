@@ -18,7 +18,7 @@ from typing import Any
 
 from hmac import compare_digest
 
-from fastapi import Depends, FastAPI, Header, HTTPException, status
+from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 
 import app.database as _db
@@ -144,12 +144,50 @@ async def clients_with_competitive_monitoring(
     }
 
 
+@app.get("/api/reports/list", tags=["Internal"])
+async def list_reports(current_user: CurrentUser = Depends(get_current_user)):
+    """Returns all generated reports for the authenticated client, newest first."""
+    async with acquire_for_client(current_user.client_id) as conn:
+        rows = await conn.fetch(
+            """SELECT id, report_type, s3_key, period_start, period_end, created_at
+               FROM reports WHERE client_id = $1 ORDER BY created_at DESC LIMIT 50""",
+            current_user.client_id,
+        )
+    return {
+        "reports": [
+            {k: str(v) if v is not None else None for k, v in dict(r).items()}
+            for r in rows
+        ]
+    }
+
+
 @app.post("/api/reports/generate", status_code=202, tags=["Internal"])
-async def generate_report(current_user: CurrentUser = Depends(get_current_user)):
+async def generate_report(
+    payload: dict[str, Any],
+    bg: BackgroundTasks,
+    current_user: CurrentUser = Depends(get_current_user),
+):
     """
-    Trigger report generation for the authenticated client.
-    Stub — Phase 6 wires PDF generation (WeasyPrint) + S3 upload and returns an s3_key.
+    Trigger PDF report generation for the authenticated client (background task).
+    Returns immediately; report_service generates PDF + S3 upload async.
     """
+    from app.services.report_service import generate_report as _generate
+
+    report_type = payload.get("report_type", "weekly_intelligence")
+    period = payload.get("period", "last_7_days")
+    client_id = str(current_user.client_id)
+
+    async def _run():
+        if _db.pool is None:
+            return
+        async with _db.pool.acquire() as conn:
+            try:
+                await _generate(conn, client_id, report_type, period)
+            except Exception as exc:
+                import logging
+                logging.getLogger(__name__).error("report generation failed: %s", exc)
+
+    bg.add_task(_run)
     return {"status": "report_queued", "s3_key": None}
 
 
@@ -165,6 +203,88 @@ async def churn_alert_webhook(
     Stub — Phase 6 wires n8n webhook dispatch. Requires X-N8N-Webhook-Secret.
     """
     return {"status": "received"}
+
+
+@app.get("/api/data-sources", tags=["Internal"])
+async def list_data_sources(current_user: CurrentUser = Depends(get_current_user)):
+    """Returns data sources connected by the authenticated client. Credentials are never returned."""
+    async with acquire_for_client(current_user.client_id) as conn:
+        rows = await conn.fetch(
+            """SELECT id, source_type, is_active, last_synced_at, created_at
+               FROM data_sources WHERE client_id = $1 ORDER BY created_at ASC""",
+            current_user.client_id,
+        )
+    return {
+        "sources": [
+            {
+                "id": str(r["id"]),
+                "source_type": r["source_type"],
+                "is_active": r["is_active"],
+                "last_synced_at": str(r["last_synced_at"]) if r["last_synced_at"] else None,
+                "created_at": str(r["created_at"]),
+            }
+            for r in rows
+        ]
+    }
+
+
+@app.post("/api/data-sources", status_code=201, tags=["Internal"])
+async def add_data_source(
+    payload: dict[str, Any],
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """
+    Add a new data source for the authenticated client.
+    Credentials are AES-256-encrypted at the app layer before storage (CLAUDE.md §14).
+    """
+    import uuid as _uuid
+    from app.services.credential_encryption import encrypt_credentials
+
+    source_type = payload.get("source_type", "").strip()
+    raw_credentials = payload.get("credentials", {})
+    config = payload.get("config", {})
+
+    if not source_type:
+        raise HTTPException(status_code=422, detail="source_type is required")
+
+    encrypted = encrypt_credentials(raw_credentials) if raw_credentials else {}
+    new_id = _uuid.uuid4()
+
+    async with acquire_for_client(current_user.client_id) as conn:
+        await conn.execute(
+            """INSERT INTO data_sources (id, client_id, source_type, credentials, config, is_active, created_at)
+               VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, TRUE, NOW())""",
+            new_id,
+            current_user.client_id,
+            source_type,
+            __import__("json").dumps(encrypted),
+            __import__("json").dumps(config),
+        )
+    return {"id": str(new_id), "source_type": source_type, "status": "connected"}
+
+
+@app.patch("/api/data-sources/{source_id}", tags=["Internal"])
+async def update_data_source(
+    source_id: str,
+    payload: dict[str, Any],
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Toggle is_active for a data source owned by the authenticated client."""
+    import uuid as _uuid
+    is_active = payload.get("is_active")
+    if is_active is None:
+        raise HTTPException(status_code=422, detail="is_active required")
+    async with acquire_for_client(current_user.client_id) as conn:
+        result = await conn.execute(
+            """UPDATE data_sources SET is_active = $1
+               WHERE id = $2 AND client_id = $3""",
+            bool(is_active),
+            _uuid.UUID(source_id),
+            current_user.client_id,
+        )
+    if result == "UPDATE 0":
+        raise HTTPException(status_code=404, detail="Data source not found")
+    return {"status": "updated"}
 
 
 @app.get("/api/dashboard/summary", tags=["Internal"])

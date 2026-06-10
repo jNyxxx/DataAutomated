@@ -1,0 +1,273 @@
+{
+  "name": "02 — Competitive Signal Monitor",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 2
+            }
+          ]
+        }
+      },
+      "id": "a2b3c4d5-0002-0002-0002-000000000001",
+      "name": "Every 2 Hours",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{$env.BACKEND_URL}}/api/clients/with-competitive-monitoring",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-N8N-Webhook-Secret",
+              "value": "={{$env.N8N_WEBHOOK_SECRET}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a2b3c4d5-0002-0002-0002-000000000002",
+      "name": "Get Monitoring Clients",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "clients",
+        "options": {}
+      },
+      "id": "a2b3c4d5-0002-0002-0002-000000000003",
+      "name": "Split Clients",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.BACKEND_URL}}/api/agents/competitive-signal/run",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$env.N8N_SERVICE_TOKEN}}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyContentType": "json",
+        "jsonBody": "={{ JSON.stringify({ client_id: $json.id }) }}",
+        "options": {}
+      },
+      "id": "a2b3c4d5-0002-0002-0002-000000000004",
+      "name": "Run CompSig Agent",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=={{$env.BACKEND_URL}}/signals/latest",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$env.N8N_SERVICE_TOKEN}}"
+            },
+            {
+              "name": "X-Client-ID",
+              "value": "={{ $('Split Clients').item.json.id }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a2b3c4d5-0002-0002-0002-000000000005",
+      "name": "Fetch Latest Signals",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1120, 300]
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "signals",
+        "options": {}
+      },
+      "id": "a2b3c4d5-0002-0002-0002-000000000006",
+      "name": "Split Signals",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [1340, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-critical",
+              "leftValue": "={{ $json.urgency }}",
+              "rightValue": "critical",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            },
+            {
+              "id": "cond-unread",
+              "leftValue": "={{ $json.is_read }}",
+              "rightValue": false,
+              "operator": {
+                "type": "boolean",
+                "operation": "false"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a2b3c4d5-0002-0002-0002-000000000007",
+      "name": "Is Critical & Unread?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1560, 300]
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "#client-alerts",
+          "mode": "name"
+        },
+        "messageType": "block",
+        "blocksUi": "=[\n  {\n    \"type\": \"header\",\n    \"text\": { \"type\": \"plain_text\", \"text\": \"🚨 Critical Competitive Signal\" }\n  },\n  {\n    \"type\": \"section\",\n    \"fields\": [\n      { \"type\": \"mrkdwn\", \"text\": \"*Competitor:*\\n{{ $json.competitor_name }}\" },\n      { \"type\": \"mrkdwn\", \"text\": \"*Type:*\\n{{ $json.signal_type }}\" },\n      { \"type\": \"mrkdwn\", \"text\": \"*Client:*\\n{{ $('Split Clients').item.json.name }}\" },\n      { \"type\": \"mrkdwn\", \"text\": \"*Source:*\\n{{ $json.signal_source }}\" }\n    ]\n  },\n  {\n    \"type\": \"section\",\n    \"text\": { \"type\": \"mrkdwn\", \"text\": \"*Strategic Context:*\\n{{ $json.strategic_context }}\" }\n  }\n]",
+        "otherOptions": {}
+      },
+      "id": "a2b3c4d5-0002-0002-0002-000000000008",
+      "name": "Slack Alert",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [1780, 180],
+      "credentials": {
+        "slackApi": {
+          "id": "slack-credential-id",
+          "name": "DataAutomated Slack"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.resend.com/emails",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$env.RESEND_API_KEY}}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyContentType": "json",
+        "jsonBody": "={{ JSON.stringify({\n  from: 'DataAutomated <alerts@dataautomated.io>',\n  to: [$('Split Clients').item.json.email],\n  subject: '🚨 Critical Competitive Signal: ' + $json.competitor_name,\n  html: '<h2>Critical Competitive Signal Detected</h2><p><strong>Competitor:</strong> ' + $json.competitor_name + '</p><p><strong>Signal Type:</strong> ' + $json.signal_type + '</p><p><strong>Strategic Context:</strong><br>' + $json.strategic_context + '</p><p>Log in to your DataAutomated dashboard to view the full analysis.</p>'\n}) }}",
+        "options": {}
+      },
+      "id": "a2b3c4d5-0002-0002-0002-000000000009",
+      "name": "Send Critical Alert Email",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1780, 360]
+    },
+    {
+      "parameters": {},
+      "id": "a2b3c4d5-0002-0002-0002-000000000010",
+      "name": "Not Critical",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [1780, 540]
+    }
+  ],
+  "connections": {
+    "Every 2 Hours": {
+      "main": [
+        [{"node": "Get Monitoring Clients", "type": "main", "index": 0}]
+      ]
+    },
+    "Get Monitoring Clients": {
+      "main": [
+        [{"node": "Split Clients", "type": "main", "index": 0}]
+      ]
+    },
+    "Split Clients": {
+      "main": [
+        [{"node": "Run CompSig Agent", "type": "main", "index": 0}]
+      ]
+    },
+    "Run CompSig Agent": {
+      "main": [
+        [{"node": "Fetch Latest Signals", "type": "main", "index": 0}]
+      ]
+    },
+    "Fetch Latest Signals": {
+      "main": [
+        [{"node": "Split Signals", "type": "main", "index": 0}]
+      ]
+    },
+    "Split Signals": {
+      "main": [
+        [{"node": "Is Critical & Unread?", "type": "main", "index": 0}]
+      ]
+    },
+    "Is Critical & Unread?": {
+      "main": [
+        [
+          {"node": "Slack Alert", "type": "main", "index": 0},
+          {"node": "Send Critical Alert Email", "type": "main", "index": 0}
+        ],
+        [{"node": "Not Critical", "type": "main", "index": 0}]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "pinData": {},
+  "versionId": "a2b3c4d5-0002-0002-0002-000000000000",
+  "meta": {
+    "instanceId": "dataautomated-local"
+  },
+  "id": "wf-competitive-signal-monitor",
+  "tags": [
+    {"id": "tag-compsig", "name": "competitive-signals"},
+    {"id": "tag-alerts", "name": "alerts"}
+  ]
+}

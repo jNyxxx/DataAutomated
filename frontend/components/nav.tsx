@@ -8,6 +8,8 @@ const links = [
   { href: '/insights', label: 'VoC Insights' },
   { href: '/signals', label: 'Signals' },
   { href: '/journeys', label: 'Journeys' },
+  { href: '/reports', label: 'Reports' },
+  { href: '/settings', label: 'Settings' },
 ];
 
 export default function Nav() {
