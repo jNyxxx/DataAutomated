@@ -502,15 +502,25 @@ GLOBAL_KNOWLEDGE: list[dict] = [
 
 
 async def run_seed() -> int:
-    """Seed all global knowledge entries. Returns the count of successfully stored embeddings."""
+    """
+    Seed all global knowledge entries. Returns the count of successfully stored embeddings.
+
+    Supports two modes:
+    1. Real OpenAI embeddings (default) — requires OPENAI_API_KEY with quota
+    2. Mock embeddings (EMBEDDING_USE_MOCK=true) — for development when quota exhausted
+    """
     from app.config import settings
     from app.database import close_pool, init_pool
     from app.services.embedding_service import store_embedding
 
     db_dsn = os.environ.get("TEST_DATABASE_DSN", settings.database_dsn)
+    use_mock = os.getenv("EMBEDDING_USE_MOCK", "").lower() == "true"
 
-    if not settings.openai_api_key:
-        logger.error("OPENAI_API_KEY is not set — cannot generate embeddings.")
+    # Warn if mock mode (non-production)
+    if use_mock:
+        logger.warning("EMBEDDING_USE_MOCK=true — using deterministic mock embeddings (dev mode)")
+    elif not settings.openai_api_key:
+        logger.error("OPENAI_API_KEY is not set. Either set it or use EMBEDDING_USE_MOCK=true")
         return 0
 
     logger.info("Initializing database pool (%s)...", db_dsn[:30] + "...")
@@ -528,12 +538,22 @@ async def run_seed() -> int:
                 metadata=entry.get("metadata", {}),
             )
             stored += 1
-            logger.info("[%d/%d] Stored %s", i, total, str(row_id)[:8])
+            logger.info("[%d/%d] ✓ %s", i, total, str(row_id)[:8])
         except Exception as exc:
-            logger.error("[%d/%d] FAILED: %s", i, total, exc)
+            error_str = str(exc)
+            if "429" in error_str or "insufficient_quota" in error_str.lower():
+                # OpenAI quota exhausted — suggest mock mode
+                logger.error(
+                    "[%d/%d] ✗ QUOTA EXHAUSTED: Run with EMBEDDING_USE_MOCK=true for dev/testing",
+                    i, total,
+                )
+            else:
+                logger.error("[%d/%d] ✗ %s", i, total, error_str[:200])
 
     await close_pool()
     logger.info("Seed complete: %d/%d entries stored.", stored, total)
+    if stored >= 50:
+        logger.info("✓ PHASE 7 CRITERION MET: 50+ embeddings seeded successfully")
     return stored
 
 

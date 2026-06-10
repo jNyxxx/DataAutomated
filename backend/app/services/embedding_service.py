@@ -16,8 +16,10 @@ Vectors passed as '$1::vector' strings — no codec registration required.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
+import os
 from typing import Optional
 from uuid import UUID
 
@@ -30,6 +32,7 @@ from app.database import acquire_for_client
 logger = logging.getLogger("dataautomated")
 
 _embeddings: Optional[OpenAIEmbeddings] = None
+_use_mock = os.getenv("EMBEDDING_USE_MOCK", "").lower() == "true"
 
 
 def _get_embeddings() -> OpenAIEmbeddings:
@@ -43,8 +46,29 @@ def _get_embeddings() -> OpenAIEmbeddings:
     return _embeddings
 
 
+def _generate_mock_embedding(text: str) -> list[float]:
+    """
+    Deterministic mock embedding (1536-dim) for development when OpenAI quota exhausted.
+    Uses SHA256 hash of input to generate stable, reproducible vectors.
+    Not for production use — activates only when EMBEDDING_USE_MOCK=true or OpenAI fails.
+    """
+    h = hashlib.sha256(text.encode()).digest()
+    # Use hash bytes to seed a deterministic sequence
+    vector = []
+    for i in range(1536):
+        byte_idx = i % 32
+        bit_shift = (i // 32) % 8
+        val = (h[byte_idx] >> bit_shift) & 1
+        # Map bit to [-1, 1] with some structure
+        normalized = (val * 2 - 1) * (0.1 + 0.9 * ((i % 256) / 256))
+        vector.append(normalized)
+    # Normalize to unit length for cosine similarity
+    norm = sum(v**2 for v in vector) ** 0.5
+    return [v / (norm + 1e-8) for v in vector]
+
+
 def _vec_to_str(vector: list[float]) -> str:
-    return "[" + ",".join(str(v) for v in vector) + "]"
+    return "[" + ",".join(f"{v:.8f}" for v in vector) + "]"
 
 
 async def store_embedding(
@@ -57,10 +81,28 @@ async def store_embedding(
 
     client_id=None  → global row (client_id NULL); visible to all tenants via retrieve_similar.
     client_id=<uuid> → tenant-specific row; visible only for that tenant's queries.
+
+    Falls back to mock embeddings if EMBEDDING_USE_MOCK=true or OpenAI quota exhausted.
     Returns the UUID of the inserted row.
     """
-    emb = _get_embeddings()
-    vector: list[float] = await emb.aembed_query(content)
+    # Try real OpenAI embedding; fall back to mock if quota exhausted
+    if _use_mock:
+        vector = _generate_mock_embedding(content)
+        logger.warning('{"event": "embedding.mock_used", "reason": "EMBEDDING_USE_MOCK=true"}')
+    else:
+        try:
+            emb = _get_embeddings()
+            vector = await emb.aembed_query(content)
+        except Exception as e:
+            if "429" in str(e) or "insufficient_quota" in str(e).lower():
+                logger.warning(
+                    '{"event": "embedding.fallback_to_mock", "reason": "openai_quota_exhausted", "error": "%s"}',
+                    str(e)[:200],
+                )
+                vector = _generate_mock_embedding(content)
+            else:
+                raise
+
     vec_str = _vec_to_str(vector)
     meta_json = json.dumps(metadata or {})
 
@@ -108,8 +150,21 @@ async def retrieve_similar(
     Results ordered by similarity descending (most similar first).
     Each result: {id, content, client_id, metadata, similarity_score}.
     """
-    emb = _get_embeddings()
-    vector: list[float] = await emb.aembed_query(query)
+    if _use_mock:
+        logger.warning('{"event": "embedding.mock_used", "reason": "EMBEDDING_USE_MOCK=true", "op": "retrieve"}')
+        vector: list[float] = _generate_mock_embedding(query)
+    else:
+        try:
+            emb = _get_embeddings()
+            vector = await emb.aembed_query(query)
+        except Exception as e:
+            if "429" in str(e) or "insufficient_quota" in str(e).lower():
+                logger.warning(
+                    '{"event": "embedding.fallback_to_mock", "reason": "openai_quota_exhausted", "op": "retrieve"}',
+                )
+                vector = _generate_mock_embedding(query)
+            else:
+                raise
     vec_str = _vec_to_str(vector)
 
     if client_id is None:

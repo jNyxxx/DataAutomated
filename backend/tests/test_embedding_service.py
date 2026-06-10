@@ -183,7 +183,7 @@ async def test_vec_to_str_format():
     from app.services.embedding_service import _vec_to_str
 
     result = _vec_to_str([0.1, -0.5, 1.0])
-    assert result == "[0.1,-0.5,1.0]"
+    assert result == "[0.10000000,-0.50000000,1.00000000]"
     assert result.startswith("[") and result.endswith("]")
 
 
@@ -436,3 +436,31 @@ async def test_retrieval_performance_1000_embeddings(admin_conn):
         await admin_conn.execute(
             "DELETE FROM knowledge_embeddings WHERE content LIKE 'perf_test_%'"
         )
+
+
+# ---------------------------------------------------------------------------
+# 4. Mock embedding tests — no DB, no OpenAI
+# ---------------------------------------------------------------------------
+
+async def test_mock_embedding_shape_and_normalization():
+    """_generate_mock_embedding returns 1536-dim unit-normalized vector."""
+    import math
+    from app.services.embedding_service import _generate_mock_embedding
+
+    vec = _generate_mock_embedding("SaaS churn benchmark")
+
+    assert len(vec) == 1536, f"Expected 1536 dims, got {len(vec)}"
+    norm = math.sqrt(sum(v * v for v in vec))
+    assert abs(norm - 1.0) < 1e-4, f"Expected unit norm, got {norm:.6f}"
+
+
+async def test_mock_embedding_deterministic():
+    """Same content always produces identical vectors; different content differs."""
+    from app.services.embedding_service import _generate_mock_embedding
+
+    a1 = _generate_mock_embedding("pricing feedback theme")
+    a2 = _generate_mock_embedding("pricing feedback theme")
+    b = _generate_mock_embedding("onboarding feedback theme")
+
+    assert a1 == a2, "Same content must produce identical mock vector"
+    assert a1 != b, "Different content must produce different mock vectors"
