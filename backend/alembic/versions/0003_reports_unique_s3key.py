@@ -24,17 +24,28 @@ Downgrade removes the constraint (index drops automatically).
 """
 
 from alembic import op
+from sqlalchemy import text
 
 
 def upgrade() -> None:
-    op.execute(
-        """ALTER TABLE reports
-           ADD CONSTRAINT reports_client_s3key_unique
-           UNIQUE (client_id, s3_key)"""
-    )
+    # Idempotent: skip if the constraint already exists (e.g. applied manually in dev).
+    op.execute(text("""
+        DO $$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM pg_constraint
+                WHERE conname = 'reports_client_s3key_unique'
+            ) THEN
+                ALTER TABLE reports
+                    ADD CONSTRAINT reports_client_s3key_unique
+                    UNIQUE (client_id, s3_key);
+            END IF;
+        END
+        $$;
+    """))
 
 
 def downgrade() -> None:
-    op.execute(
+    op.execute(text(
         "ALTER TABLE reports DROP CONSTRAINT IF EXISTS reports_client_s3key_unique"
-    )
+    ))
