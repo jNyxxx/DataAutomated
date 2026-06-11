@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 
 import asyncpg
 import boto3
-from botocore.exceptions import ClientError
+from botocore.exceptions import BotoCoreError, ClientError
 from jinja2 import Environment, DictLoader
 
 from app.config import settings
@@ -123,10 +123,15 @@ async def generate_report(
     client_id: str,
     report_type: str = "weekly_intelligence",
     period: str = "last_7_days",
+    report_id: str | None = None,
 ) -> dict:
     """
     Fetch client data, render PDF, upload to S3, insert reports row.
     Returns {"report_id": str, "s3_url": str, "status": "complete"}.
+
+    `report_id` may be pre-allocated by the caller (the /api/reports/generate
+    trigger does this so n8n WF03 can poll for *this* run's artifact rather than
+    whatever "latest" exists — §13). When omitted, a fresh id is generated.
     """
     client_row = await conn.fetchrow(
         "SELECT id, name, email FROM clients WHERE id = $1 AND is_active = TRUE",
@@ -185,7 +190,7 @@ async def generate_report(
     s3_key = f"{client_id}/{report_type}_{now.strftime('%Y%m%d')}.pdf"
     s3_url = _upload_to_s3(pdf_bytes, s3_key)
 
-    report_id = str(uuid.uuid4())
+    report_id = report_id or str(uuid.uuid4())
     await conn.execute(
         """INSERT INTO reports (id, client_id, report_type, s3_key, period_start, period_end, created_at)
            VALUES ($1, $2, $3, $4, $5, $6, $7)""",
@@ -217,9 +222,35 @@ def _html_to_pdf(html: str) -> bytes:
         return html.encode("utf-8")
 
 
-def _upload_to_s3(data: bytes, key: str) -> str:
-    bucket = getattr(settings, "S3_REPORTS_BUCKET", "dataautomated-reports")
-    region = getattr(settings, "AWS_REGION", "us-east-1")
+def presign_report_url(key: str | None, expires_in: int = 604800) -> str | None:
+    """
+    Mint a presigned GET URL for a private report object (CLAUDE.md §14 — report
+    PDFs are never public). n8n calls /api/reports/latest-for-client at send time,
+    so the link is freshly minted for each weekly email. SigV4 caps presigned-URL
+    lifetime at 7 days (604800s); a weekly report is superseded within that window,
+    so 7 days is the maximum useful TTL.
+
+    Returns None (logged) when signing can't happen — e.g. no AWS credentials in
+    local dev — so callers degrade gracefully instead of raising. A real signed URL
+    is therefore only produced where credentials resolve (the ECS task role in prod).
+    """
+    if not key:
+        return None
+    try:
+        s3 = boto3.client("s3", region_name=settings.aws_region)
+        return s3.generate_presigned_url(
+            "get_object",
+            Params={"Bucket": settings.s3_reports_bucket, "Key": key},
+            ExpiresIn=expires_in,
+        )
+    except (BotoCoreError, ClientError) as exc:
+        logger.warning("presign failed key=%s error=%s", key, exc)
+        return None
+
+
+def _upload_to_s3(data: bytes, key: str) -> str | None:
+    bucket = settings.s3_reports_bucket
+    region = settings.aws_region
     s3 = boto3.client("s3", region_name=region)
     content_type = "application/pdf" if data[:4] == b"%PDF" else "text/html"
     try:
@@ -230,8 +261,8 @@ def _upload_to_s3(data: bytes, key: str) -> str:
             ContentType=content_type,
             ContentDisposition=f'attachment; filename="{key.split("/")[-1]}"',
         )
-        url = f"https://{bucket}.s3.{region}.amazonaws.com/{key}"
-        return url
+        # Objects are private (§14): hand back a presigned GET URL, never a raw path.
+        return presign_report_url(key)
     except ClientError as exc:
         logger.error("S3 upload failed key=%s error=%s", key, exc)
         raise

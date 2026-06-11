@@ -141,6 +141,133 @@ async def test_active_clients_accepts_internal_secret(http_client, db_pool, monk
     assert "clients" in resp.json()
 
 
+async def test_clients_with_competitive_monitoring_returns_email(http_client, db_pool, monkeypatch):
+    monkeypatch.setattr(settings, "n8n_webhook_secret", "test-internal-secret")
+    resp = await http_client.get(
+        "/api/clients/with-competitive-monitoring",
+        headers={"X-N8N-Webhook-Secret": "test-internal-secret"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "clients" in data
+    for client in data["clients"]:
+        assert "email" in client
+
+
+async def test_latest_report_for_client_returns_s3_url(http_client, n8n_client_id, monkeypatch):
+    """Seed a report row, then confirm the endpoint reads the stored s3_key and
+    routes it through report_service.presign_report_url (the raw-path code it
+    replaced never did). Local runs have no AWS creds, so the signer is
+    monkeypatched to a sentinel — a real signed URL is only produced in prod
+    under the ECS task role; this test verifies the *wiring*, not the signature.
+    """
+    monkeypatch.setattr(settings, "n8n_webhook_secret", "test-internal-secret")
+    import app.services.report_service as report_service
+    sentinel = "https://signed.example/report.pdf?sig=abc"
+    monkeypatch.setattr(report_service, "presign_report_url", lambda key, **kw: sentinel)
+
+    s3_key = f"{n8n_client_id}/weekly_intelligence_20260612.pdf"
+    conn = await asyncpg.connect(TEST_DB_DSN)
+    try:
+        await conn.execute(
+            "INSERT INTO reports (client_id, report_type, s3_key) VALUES ($1, $2, $3);",
+            _uuid.UUID(n8n_client_id), "weekly_intelligence", s3_key,
+        )
+    finally:
+        await conn.close()
+    # report row is cascade-deleted when the n8n_client_id fixture deletes the client.
+
+    resp = await http_client.get(
+        f"/api/reports/latest-for-client?client_id={n8n_client_id}",
+        headers={"X-N8N-Webhook-Secret": "test-internal-secret"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["report"] is not None
+    assert data["report"]["s3_key"] == s3_key
+    assert data["s3_url"] == sentinel
+
+
+def test_presign_report_url_signs_and_degrades(monkeypatch):
+    """presign_report_url returns a signed URL when boto3 can sign, None for an
+    empty key, and None (never raises) when credentials don't resolve."""
+    import app.services.report_service as report_service
+    from botocore.exceptions import NoCredentialsError
+
+    class _FakeS3:
+        def generate_presigned_url(self, op, Params, ExpiresIn):
+            return f"https://signed/{Params['Key']}?e={ExpiresIn}"
+
+    monkeypatch.setattr(report_service.boto3, "client", lambda *a, **k: _FakeS3())
+    assert report_service.presign_report_url("c/report.pdf").startswith("https://signed/c/report.pdf")
+    assert report_service.presign_report_url(None) is None
+
+    class _BrokenS3:
+        def generate_presigned_url(self, *a, **k):
+            raise NoCredentialsError()
+
+    monkeypatch.setattr(report_service.boto3, "client", lambda *a, **k: _BrokenS3())
+    assert report_service.presign_report_url("c/report.pdf") is None
+
+
+async def test_latest_report_for_client_pins_report_id(http_client, n8n_client_id, monkeypatch):
+    """With report_id, the endpoint returns THAT report — not the most recent —
+    so WF03 emails the artifact it just generated, never a stale 'latest' PDF
+    (the bug this run fixes). Seeds an older pinned report AND a newer one that
+    would win a plain 'latest' query, then asserts the older pinned id wins.
+    """
+    from datetime import datetime, timezone, timedelta
+
+    monkeypatch.setattr(settings, "n8n_webhook_secret", "test-internal-secret")
+    import app.services.report_service as report_service
+    monkeypatch.setattr(report_service, "presign_report_url", lambda key, **kw: f"signed::{key}")
+
+    rid_pinned = _uuid.uuid4()
+    key_pinned = f"{n8n_client_id}/weekly_intelligence_20260605.pdf"
+    key_newer = f"{n8n_client_id}/weekly_intelligence_20260612.pdf"
+    now = datetime.now(timezone.utc)
+    conn = await asyncpg.connect(TEST_DB_DSN)
+    try:
+        await conn.execute(
+            "INSERT INTO reports (id, client_id, report_type, s3_key, created_at) "
+            "VALUES ($1, $2, $3, $4, $5);",
+            rid_pinned, _uuid.UUID(n8n_client_id), "weekly_intelligence",
+            key_pinned, now - timedelta(days=7),
+        )
+        await conn.execute(  # newer row — would win an unpinned 'latest' query
+            "INSERT INTO reports (client_id, report_type, s3_key, created_at) "
+            "VALUES ($1, $2, $3, $4);",
+            _uuid.UUID(n8n_client_id), "weekly_intelligence", key_newer, now,
+        )
+    finally:
+        await conn.close()
+
+    resp = await http_client.get(
+        f"/api/reports/latest-for-client?client_id={n8n_client_id}&report_id={rid_pinned}",
+        headers={"X-N8N-Webhook-Secret": "test-internal-secret"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["report"]["id"] == str(rid_pinned)
+    assert data["report"]["s3_key"] == key_pinned     # pinned, not key_newer
+    assert data["s3_url"] == f"signed::{key_pinned}"
+
+
+async def test_latest_report_for_client_unknown_report_id_skips_send(http_client, n8n_client_id, monkeypatch):
+    """If this run's report isn't generated yet (slow/failed), fetching its id
+    returns no row and no s3_url, so WF03's 'Report Ready?' guard skips the send
+    rather than emailing a stale report."""
+    monkeypatch.setattr(settings, "n8n_webhook_secret", "test-internal-secret")
+    resp = await http_client.get(
+        f"/api/reports/latest-for-client?client_id={n8n_client_id}&report_id={_uuid.uuid4()}",
+        headers={"X-N8N-Webhook-Secret": "test-internal-secret"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["report"] is None
+    assert data["s3_url"] is None
+
+
 async def test_churn_webhook_requires_internal_secret(http_client, monkeypatch):
     monkeypatch.setattr(settings, "n8n_webhook_secret", "test-internal-secret")
     resp = await http_client.post("/webhook/churn-alert", json={"client_id": "x"})
@@ -322,6 +449,21 @@ async def test_reports_generate_rejects_anonymous(n8n_client_id):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         resp = await ac.post("/api/reports/generate", json={"client_id": n8n_client_id})
     assert resp.status_code == 401
+
+
+async def test_reports_generate_returns_report_id(n8n_client_id):
+    """The trigger pre-allocates and returns report_id so WF03 can pin the exact
+    artifact it generated (anti-stale — §13)."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        resp = await ac.post(
+            "/api/reports/generate",
+            headers=_N8N_HEADERS,
+            json={"client_id": n8n_client_id, "report_type": "weekly_intelligence"},
+        )
+    assert resp.status_code == 202
+    body = resp.json()
+    assert body["status"] == "report_queued"
+    assert body.get("report_id")
 
 
 # ---------------------------------------------------------------------------

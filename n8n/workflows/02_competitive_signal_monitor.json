@@ -132,9 +132,9 @@
             {
               "id": "cond-unread",
               "leftValue": "={{ $json.is_read }}",
-              "rightValue": "False",
+              "rightValue": false,
               "operator": {
-                "type": "string",
+                "type": "boolean",
                 "operation": "equals"
               }
             }
@@ -193,7 +193,7 @@
         "sendBody": true,
         "bodyContentType": "json",
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({\n  from: 'DataAutomated <alerts@dataautomated.io>',\n  to: [$('Split Clients').item.json.email],\n  subject: '🚨 Critical Competitive Signal: ' + $json.competitor_name,\n  html: '<h2>Critical Competitive Signal Detected</h2><p><strong>Competitor:</strong> ' + $json.competitor_name + '</p><p><strong>Signal Type:</strong> ' + $json.signal_type + '</p><p><strong>Strategic Context:</strong><br>' + $json.strategic_context + '</p><p>Log in to your DataAutomated dashboard to view the full analysis.</p>'\n}) }}",
+        "jsonBody": "={{ JSON.stringify({\n  from: 'DataAutomated <alerts@dataautomated.io>',\n  to: [$('Split Clients').item.json.email || 'team@dataautomated.io'],\n  subject: '🚨 Critical Competitive Signal: ' + $json.competitor_name,\n  html: '<h2>Critical Competitive Signal Detected</h2><p><strong>Competitor:</strong> ' + $json.competitor_name + '</p><p><strong>Signal Type:</strong> ' + $json.signal_type + '</p><p><strong>Strategic Context:</strong><br>' + $json.strategic_context + '</p><p>Log in to your DataAutomated dashboard to view the full analysis.</p>'\n}) }}",
         "options": {}
       },
       "id": "a2b3c4d5-0002-0002-0002-000000000009",

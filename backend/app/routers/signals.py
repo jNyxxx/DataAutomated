@@ -80,7 +80,11 @@ async def latest(current_user: CurrentUser = Depends(get_current_user)):
         )
     return {
         "signals": [
-            {k: str(v) if v is not None else None for k, v in dict(r).items()}
+            {
+                **{k: str(v) if v is not None and k != "is_read" else v
+                   for k, v in dict(r).items()},
+                "is_read": bool(r["is_read"]),
+            }
             for r in rows
         ]
     }
@@ -112,7 +116,11 @@ async def n8n_latest_signals(
         )
     return {
         "signals": [
-            {k: str(v) if v is not None else None for k, v in dict(r).items()}
+            {
+                **{k: str(v) if v is not None and k != "is_read" else v
+                   for k, v in dict(r).items()},
+                "is_read": bool(r["is_read"]),
+            }
             for r in rows
         ]
     }

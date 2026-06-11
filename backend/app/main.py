@@ -212,11 +212,16 @@ async def clients_with_competitive_monitoring(
         return {"clients": []}
     async with _db.pool.acquire() as conn:
         rows = await conn.fetch(
-            "SELECT id, name, plan FROM clients WHERE is_active = TRUE"
+            "SELECT id, name, email, plan FROM clients WHERE is_active = TRUE"
         )
     return {
         "clients": [
-            {"id": str(r["id"]), "name": r["name"], "plan": r["plan"]}
+            {
+                "id": str(r["id"]),
+                "name": r["name"],
+                "email": r["email"],
+                "plan": r["plan"]
+            }
             for r in rows
         ]
     }
@@ -236,6 +241,74 @@ async def list_reports(current_user: CurrentUser = Depends(get_current_user)):
             {k: str(v) if v is not None else None for k, v in dict(r).items()}
             for r in rows
         ]
+    }
+
+
+@app.get("/api/reports/latest-for-client", tags=["Internal"])
+async def latest_report_for_client(
+    client_id: str,
+    report_id: str | None = None,
+    _internal_auth: None = Depends(require_n8n_webhook_secret),
+):
+    """
+    Returns a report row for an explicit client_id so n8n Workflow 3 can build
+    the Resend download link, plus the client's name/email and a presigned S3 URL.
+
+    When `report_id` is supplied (WF03 pins the artifact it just triggered),
+    returns *exactly* that report — never a stale "latest" one — so a slow or
+    failed generation yields no row (s3_url=None) and the workflow safely skips
+    the send instead of emailing last week's PDF. Without `report_id`, returns
+    the most recent report. Tenant-scoped: a report_id only resolves within its
+    own client (§6). Requires X-N8N-Webhook-Secret (server-to-server — §13).
+    """
+    import uuid as _uuid
+
+    resolved_client_id = await resolve_service_client(client_id)
+    async with acquire_for_client(resolved_client_id) as conn:
+        if report_id is not None:
+            try:
+                rid = _uuid.UUID(report_id)
+            except (ValueError, AttributeError, TypeError):
+                rid = None
+            row = (
+                await conn.fetchrow(
+                    """SELECT id, report_type, s3_key, period_start, period_end, created_at
+                       FROM reports
+                       WHERE id = $1 AND client_id = $2""",
+                    rid,
+                    resolved_client_id,
+                )
+                if rid is not None
+                else None
+            )
+        else:
+            row = await conn.fetchrow(
+                """SELECT id, report_type, s3_key, period_start, period_end, created_at
+                   FROM reports
+                   WHERE client_id = $1
+                   ORDER BY created_at DESC LIMIT 1""",
+                resolved_client_id,
+            )
+        # Also fetch client email so n8n can address the Resend call.
+        client = await conn.fetchrow(
+            "SELECT name, email FROM clients WHERE id = $1",
+            resolved_client_id,
+        )
+    if row is None:
+        return {
+            "report": None,
+            "client_name": str(client["name"]) if client else None,
+            "client_email": str(client["email"]) if client else None,
+            "s3_url": None,
+        }
+    # Mint a presigned GET URL from the stored key at read-time (objects are
+    # private — §14). Lazy import keeps boto3 off main.py's module-load path.
+    from app.services.report_service import presign_report_url
+    return {
+        "report": {k: str(v) if v is not None else None for k, v in dict(row).items()},
+        "client_name": str(client["name"]) if client else None,
+        "client_email": str(client["email"]) if client else None,
+        "s3_url": presign_report_url(row["s3_key"]),
     }
 
 
@@ -265,6 +338,13 @@ async def generate_report(
     period = payload.get("period", "last_7_days")
     client_id = str(resolved_client_id)
 
+    # Pre-allocate the report id and return it so n8n WF03 can poll for *this*
+    # run's artifact (GET .../latest-for-client?report_id=...) instead of
+    # whatever "latest" happens to exist — without it, a slow or failed
+    # generation makes the workflow email last week's stale PDF (§13).
+    import uuid as _uuid
+    report_id = str(_uuid.uuid4())
+
     async def _run():
         if _db.pool is None:
             return
@@ -274,13 +354,13 @@ async def generate_report(
             from app.services.report_service import generate_report as _generate
 
             async with _db.pool.acquire() as conn:
-                await _generate(conn, client_id, report_type, period)
+                await _generate(conn, client_id, report_type, period, report_id=report_id)
         except Exception as exc:
             import logging
             logging.getLogger(__name__).error("report generation failed: %s", exc)
 
     bg.add_task(_run)
-    return {"status": "report_queued", "s3_key": None}
+    return {"status": "report_queued", "report_id": report_id}
 
 
 @app.post("/webhook/churn-alert", status_code=202, tags=["Internal"])

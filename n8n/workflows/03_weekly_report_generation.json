@@ -77,10 +77,43 @@
         "options": {}
       },
       "id": "a3b4c5d6-0003-0003-0003-000000000004",
-      "name": "Generate Report",
+      "name": "Trigger Report Generation",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "amount": 15,
+        "unit": "minutes"
+      },
+      "id": "a3b4c5d6-0003-0003-0003-000000000005",
+      "name": "Wait 15 min for generation",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [1120, 300],
+      "webhookId": "wf03-wait-resume"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{$env.BACKEND_URL}}/api/reports/latest-for-client?client_id={{ $('Split Clients').item.json.id }}&report_id={{ $('Trigger Report Generation').item.json.report_id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-N8N-Webhook-Secret",
+              "value": "={{$env.N8N_WEBHOOK_SECRET}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a3b4c5d6-0003-0003-0003-000000000006",
+      "name": "Fetch Generated Report",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1340, 300]
     },
     {
       "parameters": {
@@ -92,8 +125,8 @@
           },
           "conditions": [
             {
-              "id": "cond-s3-url",
-              "leftValue": "={{ $json.s3_url }}",
+              "id": "cond-report-ready",
+              "leftValue": "={{ $json.s3_url || '' }}",
               "rightValue": "",
               "operator": {
                 "type": "string",
@@ -105,11 +138,11 @@
         },
         "options": {}
       },
-      "id": "a3b4c5d6-0003-0003-0003-000000000005",
-      "name": "Report Ready?",
+      "id": "a3b4c5d6-0003-0003-0003-000000000007",
+      "name": "Report Ready? (has s3_url)",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
-      "position": [1120, 300]
+      "position": [1560, 300]
     },
     {
       "parameters": {
@@ -131,22 +164,22 @@
         "sendBody": true,
         "bodyContentType": "json",
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({\n  from: 'DataAutomated <reports@dataautomated.io>',\n  to: [$('Split Clients').item.json.email],\n  subject: '📊 Your Weekly Intelligence Report — ' + new Date().toISOString().slice(0,10),\n  html: '<h2>Your Weekly Intelligence Report is Ready</h2><p>Hi ' + $('Split Clients').item.json.name + ',</p><p>Your weekly intelligence briefing covering the past 7 days is now available.</p><p><a href=\"' + $json.s3_url + '\" style=\"background:#4f46e5;color:white;padding:12px 24px;border-radius:6px;text-decoration:none;display:inline-block;\">Download Report</a></p><p>You can also view your live dashboard at <a href=\"https://app.dataautomated.io/dashboard\">app.dataautomated.io</a>.</p>'\n}) }}",
+        "jsonBody": "={{ JSON.stringify({\n  from: 'DataAutomated <reports@dataautomated.io>',\n  to: [$json.client_email || 'team@dataautomated.io'],\n  subject: '📊 Your Weekly Intelligence Report — ' + new Date().toISOString().slice(0,10),\n  html: '<h2>Your Weekly Intelligence Report is Ready</h2><p>Hi ' + ($json.client_name || 'Valued Client') + ',</p><p>Your weekly intelligence briefing covering the past 7 days is now available.</p><p><a href=\"' + $json.s3_url + '\" style=\"background:#4f46e5;color:white;padding:12px 24px;border-radius:6px;text-decoration:none;display:inline-block;\">Download Report</a></p><p>You can also view your live dashboard at <a href=\"https://app.dataautomated.io/dashboard\">app.dataautomated.io</a>.</p>'\n}) }}",
         "options": {}
       },
-      "id": "a3b4c5d6-0003-0003-0003-000000000006",
+      "id": "a3b4c5d6-0003-0003-0003-000000000008",
       "name": "Send Weekly Briefing",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1340, 200]
+      "position": [1780, 180]
     },
     {
       "parameters": {},
-      "id": "a3b4c5d6-0003-0003-0003-000000000007",
-      "name": "Report Pending",
+      "id": "a3b4c5d6-0003-0003-0003-000000000009",
+      "name": "Report Not Yet Ready",
       "type": "n8n-nodes-base.noOp",
       "typeVersion": 1,
-      "position": [1340, 420]
+      "position": [1780, 420]
     }
   ],
   "connections": {
@@ -162,18 +195,28 @@
     },
     "Split Clients": {
       "main": [
-        [{"node": "Generate Report", "type": "main", "index": 0}]
+        [{"node": "Trigger Report Generation", "type": "main", "index": 0}]
       ]
     },
-    "Generate Report": {
+    "Trigger Report Generation": {
       "main": [
-        [{"node": "Report Ready?", "type": "main", "index": 0}]
+        [{"node": "Wait 15 min for generation", "type": "main", "index": 0}]
       ]
     },
-    "Report Ready?": {
+    "Wait 15 min for generation": {
+      "main": [
+        [{"node": "Fetch Generated Report", "type": "main", "index": 0}]
+      ]
+    },
+    "Fetch Generated Report": {
+      "main": [
+        [{"node": "Report Ready? (has s3_url)", "type": "main", "index": 0}]
+      ]
+    },
+    "Report Ready? (has s3_url)": {
       "main": [
         [{"node": "Send Weekly Briefing", "type": "main", "index": 0}],
-        [{"node": "Report Pending", "type": "main", "index": 0}]
+        [{"node": "Report Not Yet Ready", "type": "main", "index": 0}]
       ]
     }
   },
@@ -184,7 +227,7 @@
     "callerPolicy": "workflowsFromSameOwner"
   },
   "pinData": {},
-  "versionId": "a3b4c5d6-0003-0003-0003-000000000000",
+  "versionId": "a3b4c5d6-0003-0003-0003-000000000002",
   "meta": {
     "instanceId": "dataautomated-local"
   },

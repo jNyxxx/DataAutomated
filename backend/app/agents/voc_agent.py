@@ -210,10 +210,11 @@ async def narrative_generation_node(state: VoCState, llm: Any) -> dict:
     return {"narrative": narrative}
 
 
-async def _dispatch_churn_alert(state: VoCState) -> None:
+async def _dispatch_churn_alert(state: VoCState, client_email: str | None = None) -> None:
     """
     POST the churn alert to the n8n webhook (CLAUDE.md §13, Workflow 4).
     n8n routes on churn_risk_score (>0.25 URGENT, >0.15 early warning).
+    Includes client_email so WF04 can address Resend directly to the client.
     Never raises — alert delivery must not fail the agent run; dispatch is
     skipped (with a warning) when N8N_WEBHOOK_URL is unset (local dev without n8n).
     """
@@ -227,6 +228,7 @@ async def _dispatch_churn_alert(state: VoCState) -> None:
 
     payload = {
         "client_id": str(state["client_id"]),
+        "client_email": client_email,
         "churn_risk_score": state["churn_risk_score"],
         "top_themes": state["theme_clusters"][:3],
     }
@@ -253,7 +255,9 @@ async def _dispatch_churn_alert(state: VoCState) -> None:
 
 
 async def check_alert_node(state: VoCState) -> dict:
-    """Set alert_required when churn_risk_score > 0.15 and fire the n8n churn webhook (§7.1)."""
+    """Set alert_required when churn_risk_score > 0.15 and fire the n8n churn webhook (§7.1).
+    Looks up the client email from DB so the webhook payload includes it for Resend delivery.
+    """
     alert_required = state["churn_risk_score"] > 0.15
     if alert_required:
         logger.info(
@@ -261,7 +265,23 @@ async def check_alert_node(state: VoCState) -> dict:
             state["client_id"],
             state["churn_risk_score"],
         )
-        await _dispatch_churn_alert(state)
+        # Resolve client email for WF04 Resend delivery (CLAUDE.md §13 — "Resend to client").
+        client_email: str | None = None
+        try:
+            import app.database as _db
+            if _db.pool is not None:
+                async with _db.pool.acquire() as conn:
+                    client_email = await conn.fetchval(
+                        "SELECT email FROM clients WHERE id = $1",
+                        state["client_id"],
+                    )
+        except Exception as exc:
+            logger.warning(
+                '{"event": "voc.client_email_lookup_failed", "client_id": "%s", "error": "%s"}',
+                state["client_id"],
+                str(exc),
+            )
+        await _dispatch_churn_alert(state, client_email=client_email)
     return {"alert_required": alert_required}
 
 
