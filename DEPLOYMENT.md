@@ -4,6 +4,30 @@
 > **Account:** `456788081187` · **Region:** `ap-southeast-2` · **ECR registry:** `456788081187.dkr.ecr.ap-southeast-2.amazonaws.com`
 > Secrets appear here only as `<PLACEHOLDERS>` — real values live in AWS Secrets Manager (SR-03). Never commit `.env`.
 
+## ⚠️ INTERIM: no-domain mode (current state, June 2026)
+
+No domain is owned yet, so the §15 hostname topology below is **deferred**: the ACM
+certificate was deleted, there is no HTTPS, and the ALB routes **by port** on its raw
+DNS name (`dataautomated-alb-1029620184.ap-southeast-2.elb.amazonaws.com`):
+
+| Port | Service |
+|---|---|
+| `:80` | frontend (dashboard) |
+| `:8000` | backend API |
+| `:5678` | n8n |
+
+Deltas from the target topology while in this mode:
+- ALB SG additionally opens 8000 + 5678 to the world; **all traffic is plain HTTP**
+  (credentials/JWTs unencrypted — acceptable for testing only, fix before client traffic).
+- Frontend image is built with `NEXT_PUBLIC_API_URL=http://<alb-dns>:8000` (tag suffix `-albhttp`).
+- Backend task env adds `CORS_ORIGINS` including `http://<alb-dns>`.
+- n8n task env uses `N8N_PROTOCOL=http`, `N8N_HOST=<alb-dns>`, `WEBHOOK_URL=http://<alb-dns>:5678/`.
+- Email/Slack CTA links in workflows still point at `app.dataautomated.io` → dead links until a domain exists.
+
+**To exit interim mode:** buy the domain → re-run the ACM + HTTPS-listener + host-rule
+steps below → rebuild frontend with the real API URL → revert the n8n/CORS env deltas →
+close 8000/5678 on the ALB SG.
+
 ## Topology (§15, ADR-008)
 
 ```
