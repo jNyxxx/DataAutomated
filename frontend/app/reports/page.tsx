@@ -1,7 +1,8 @@
 import { cookies } from 'next/headers';
 import { apiRequest } from '@/lib/api';
 import ReportTrigger from '@/components/report-trigger';
-import { FileBarChart2, Download } from 'lucide-react';
+import ReportDownload from '@/components/report-download';
+import { FileBarChart2 } from 'lucide-react';
 
 interface Report {
   id: string;
@@ -91,17 +92,7 @@ export default async function ReportsPage() {
                     </td>
                     <td className="text-right">
                       {r.s3_key ? (
-                        <span
-                          className="inline-flex items-center gap-1.5 text-xs font-medium px-2 py-0.5 rounded-md"
-                          style={{
-                            background: 'rgba(16,185,129,0.10)',
-                            color: '#34D399',
-                            border: '1px solid rgba(16,185,129,0.20)',
-                          }}
-                        >
-                          <Download size={11} />
-                          PDF ready
-                        </span>
+                        <ReportDownload reportId={r.id} token={token} />
                       ) : (
                         <span style={{ color: '#334155', fontSize: 12 }}>Pending</span>
                       )}

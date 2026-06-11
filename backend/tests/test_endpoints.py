@@ -525,6 +525,109 @@ async def test_reports_duplicate_s3key_does_not_create_second_row(http_client, n
 
 
 # ---------------------------------------------------------------------------
+# Report download URL (dashboard — JWT-scoped, short-lived presign)
+# ---------------------------------------------------------------------------
+
+def _client_id_from_token(token: str) -> str:
+    from jose import jwt as _jwt
+    claims = _jwt.decode(token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm])
+    return claims["client_id"]
+
+
+async def test_report_download_url_returns_short_lived_presign(http_client, bearer_token, monkeypatch):
+    """Own report with an s3_key → 200 with a presigned URL minted at 15-min
+    expiry (not the 7-day n8n email TTL)."""
+    import app.services.report_service as report_service
+    captured: dict = {}
+
+    def _fake_presign(key, **kw):
+        captured["key"] = key
+        captured["expires_in"] = kw.get("expires_in")
+        return f"signed::{key}"
+
+    monkeypatch.setattr(report_service, "presign_report_url", _fake_presign)
+
+    client_id = _client_id_from_token(bearer_token)
+    rid = _uuid.uuid4()
+    s3_key = f"{client_id}/weekly_intelligence_20260611.pdf"
+    conn = await asyncpg.connect(TEST_DB_DSN)
+    try:
+        await conn.execute(
+            "INSERT INTO reports (id, client_id, report_type, s3_key) VALUES ($1, $2, $3, $4);",
+            rid, _uuid.UUID(client_id), "weekly_intelligence", s3_key,
+        )
+    finally:
+        await conn.close()
+    # row cascade-deletes with the bearer_token fixture's client.
+
+    resp = await http_client.get(
+        f"/api/reports/{rid}/download-url",
+        headers={"Authorization": f"Bearer {bearer_token}"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["url"] == f"signed::{s3_key}"
+    assert captured["expires_in"] == 900
+
+
+async def test_report_download_url_cross_client_404(http_client, bearer_token, n8n_client_id, monkeypatch):
+    """Another client's report_id 404s — identical to a nonexistent id, no
+    existence leak across tenants (§6)."""
+    import app.services.report_service as report_service
+    monkeypatch.setattr(report_service, "presign_report_url", lambda key, **kw: f"signed::{key}")
+
+    rid = _uuid.uuid4()
+    conn = await asyncpg.connect(TEST_DB_DSN)
+    try:
+        await conn.execute(
+            "INSERT INTO reports (id, client_id, report_type, s3_key) VALUES ($1, $2, $3, $4);",
+            rid, _uuid.UUID(n8n_client_id), "weekly_intelligence",
+            f"{n8n_client_id}/weekly_intelligence_20260611.pdf",
+        )
+    finally:
+        await conn.close()
+
+    # bearer_token belongs to a different client than n8n_client_id
+    resp = await http_client.get(
+        f"/api/reports/{rid}/download-url",
+        headers={"Authorization": f"Bearer {bearer_token}"},
+    )
+    assert resp.status_code == 404
+
+
+async def test_report_download_url_missing_s3_key_404(http_client, bearer_token):
+    """A row whose PDF was never uploaded (s3_key NULL) 404s — nothing to sign."""
+    client_id = _client_id_from_token(bearer_token)
+    rid = _uuid.uuid4()
+    conn = await asyncpg.connect(TEST_DB_DSN)
+    try:
+        await conn.execute(
+            "INSERT INTO reports (id, client_id, report_type) VALUES ($1, $2, $3);",
+            rid, _uuid.UUID(client_id), "weekly_intelligence",
+        )
+    finally:
+        await conn.close()
+
+    resp = await http_client.get(
+        f"/api/reports/{rid}/download-url",
+        headers={"Authorization": f"Bearer {bearer_token}"},
+    )
+    assert resp.status_code == 404
+
+
+async def test_report_download_url_malformed_id_404(http_client, bearer_token):
+    resp = await http_client.get(
+        "/api/reports/not-a-uuid/download-url",
+        headers={"Authorization": f"Bearer {bearer_token}"},
+    )
+    assert resp.status_code == 404
+
+
+async def test_report_download_url_requires_auth(http_client):
+    resp = await http_client.get(f"/api/reports/{_uuid.uuid4()}/download-url")
+    assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
 # Dashboard summary (< 300ms)
 # ---------------------------------------------------------------------------
 

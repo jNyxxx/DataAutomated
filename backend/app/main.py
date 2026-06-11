@@ -247,6 +247,41 @@ async def list_reports(current_user: CurrentUser = Depends(get_current_user)):
     }
 
 
+@app.get("/api/reports/{report_id}/download-url", tags=["Internal"])
+async def report_download_url(
+    report_id: str,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """
+    Mint a short-lived presigned S3 URL so the dashboard can download a report
+    PDF. Objects are private (§14) — the browser never sees a raw S3 path.
+    Tenant-scoped: the row must belong to the caller's client (§6); another
+    client's report_id 404s identically to a nonexistent one (no existence leak).
+    15-minute expiry — minted per click, unlike the 7-day n8n email link.
+    """
+    import uuid as _uuid
+
+    try:
+        rid = _uuid.UUID(report_id)
+    except (ValueError, AttributeError, TypeError):
+        raise HTTPException(status_code=404, detail="Report not found.")
+
+    async with acquire_for_client(current_user.client_id) as conn:
+        row = await conn.fetchrow(
+            "SELECT s3_key FROM reports WHERE id = $1 AND client_id = $2",
+            rid,
+            current_user.client_id,
+        )
+    if row is None or not row["s3_key"]:
+        raise HTTPException(status_code=404, detail="Report not found.")
+
+    from app.services.report_service import presign_report_url
+    url = presign_report_url(row["s3_key"], expires_in=900)
+    if url is None:
+        raise HTTPException(status_code=503, detail="Report storage unavailable.")
+    return {"url": url}
+
+
 @app.get("/api/reports/latest-for-client", tags=["Internal"])
 async def latest_report_for_client(
     client_id: str,
