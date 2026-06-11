@@ -23,12 +23,22 @@ def _s3_client():
 
     When `settings.s3_endpoint_url` is set (local minio), path-style addressing is
     forced because minio doesn't support DNS-wildcard virtual-hosted buckets.
-    In production the field is None and the default AWS SDK behaviour applies.
+
+    SigV4 + explicit virtual addressing are forced unconditionally: without them
+    this botocore version presigns legacy SigV2 URLs against the global endpoint
+    (bucket.s3.amazonaws.com), which newly created buckets answer with
+    307 TemporaryRedirect until DNS propagates and which newer regions reject
+    outright. Virtual addressing pins the regional host
+    (bucket.s3.<region>.amazonaws.com) in generated URLs.
     """
-    kwargs: dict = {"region_name": settings.aws_region}
+    from botocore.config import Config as _BotoConfig
+
+    kwargs: dict = {
+        "region_name": settings.aws_region,
+        "config": _BotoConfig(signature_version="s3v4", s3={"addressing_style": "virtual"}),
+    }
     if settings.s3_endpoint_url:
         kwargs["endpoint_url"] = settings.s3_endpoint_url
-        from botocore.config import Config as _BotoConfig
         kwargs["config"] = _BotoConfig(signature_version="s3v4", s3={"addressing_style": "path"})
     return boto3.client("s3", **kwargs)
 
