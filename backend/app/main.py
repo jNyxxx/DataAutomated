@@ -13,12 +13,15 @@ Inline /api/ routes that span domains (stable n8n contract — CLAUDE.md §10, �
 
 from __future__ import annotations
 
+import logging
 from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from jose import JWTError, jwt
+
+logger = logging.getLogger(__name__)
 
 import app.database as _db
 from app.config import settings
@@ -295,6 +298,13 @@ async def latest_report_for_client(
             resolved_client_id,
         )
     if row is None:
+        # Emitted when WF03 fetches before generation completes, or when
+        # S3/generation failed — CloudWatch can alert on this pattern.
+        logger.info(
+            "report_fetch_skip: no row found client=%s report_id=%s",
+            resolved_client_id,
+            report_id,
+        )
         return {
             "report": None,
             "client_name": str(client["name"]) if client else None,
@@ -356,8 +366,7 @@ async def generate_report(
             async with _db.pool.acquire() as conn:
                 await _generate(conn, client_id, report_type, period, report_id=report_id)
         except Exception as exc:
-            import logging
-            logging.getLogger(__name__).error("report generation failed: %s", exc)
+            logger.error("report generation failed client=%s report_id=%s error=%s", client_id, report_id, exc)
 
     bg.add_task(_run)
     return {"status": "report_queued", "report_id": report_id}

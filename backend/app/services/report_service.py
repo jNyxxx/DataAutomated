@@ -206,9 +206,14 @@ async def generate_report(
     s3_url = _upload_to_s3(pdf_bytes, s3_key)
 
     report_id = report_id or str(uuid.uuid4())
+    # ON CONFLICT DO NOTHING: if the same client already has a report for this
+    # s3_key today (a duplicate trigger), the row is silently skipped.  The
+    # pre-allocated report_id will never appear in the DB, so WF03's pinned fetch
+    # returns null → routes to the safe-skip branch — no duplicate email sent.
     await conn.execute(
         """INSERT INTO reports (id, client_id, report_type, s3_key, period_start, period_end, created_at)
-           VALUES ($1, $2, $3, $4, $5, $6, $7)""",
+           VALUES ($1, $2, $3, $4, $5, $6, $7)
+           ON CONFLICT (client_id, s3_key) DO NOTHING""",
         uuid.UUID(report_id),
         uuid.UUID(client_id),
         report_type,

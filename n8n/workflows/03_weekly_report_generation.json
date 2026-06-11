@@ -174,11 +174,32 @@
       "position": [1780, 180]
     },
     {
-      "parameters": {},
+      "parameters": {
+        "method": "POST",
+        "url": "https://slack.com/api/chat.postMessage",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$env.SLACK_BOT_TOKEN}}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyContentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  channel: '#client-alerts',\n  text: '⚠️ Weekly report not generated for *' + ($('Fetch Generated Report').item.json.client_name || 'unknown client') + '* — report_id `' + ($('Trigger Report Generation').item.json.report_id || 'unknown') + '` not found after 15 min. Check CloudWatch for `report_fetch_skip` or `report generation failed` logs.'\n}) }}",
+        "options": {}
+      },
       "id": "a3b4c5d6-0003-0003-0003-000000000009",
       "name": "Report Not Yet Ready",
-      "type": "n8n-nodes-base.noOp",
-      "typeVersion": 1,
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
       "position": [1780, 420]
     }
   ],
@@ -227,7 +248,7 @@
     "callerPolicy": "workflowsFromSameOwner"
   },
   "pinData": {},
-  "versionId": "a3b4c5d6-0003-0003-0003-000000000002",
+  "versionId": "a3b4c5d6-0003-0003-0003-000000000003",
   "meta": {
     "instanceId": "dataautomated-local"
   },

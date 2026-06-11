@@ -466,6 +466,58 @@ async def test_reports_generate_returns_report_id(n8n_client_id):
     assert body.get("report_id")
 
 
+async def test_reports_duplicate_s3key_does_not_create_second_row(http_client, n8n_client_id, monkeypatch):
+    """Duplicate-send protection: two reports with the same (client_id, s3_key) may not
+    both land in the DB.  The second INSERT uses ON CONFLICT DO NOTHING, so its
+    report_id is never committed → the second WF03 run's pinned fetch returns null →
+    routes to safe-skip instead of sending a duplicate email."""
+    from datetime import datetime, timezone
+
+    import asyncpg
+
+    monkeypatch.setattr(settings, "n8n_webhook_secret", "test-internal-secret")
+    import app.services.report_service as report_service
+    monkeypatch.setattr(report_service, "presign_report_url", lambda key, **kw: f"signed::{key}")
+
+    shared_s3_key = f"{n8n_client_id}/weekly_intelligence_20260611.pdf"
+    rid_first = _uuid.uuid4()
+    rid_second = _uuid.uuid4()
+    now = datetime.now(timezone.utc)
+
+    conn = await asyncpg.connect(TEST_DB_DSN)
+    try:
+        # Simulate first run succeeding
+        await conn.execute(
+            "INSERT INTO reports (id, client_id, report_type, s3_key, created_at) "
+            "VALUES ($1, $2, $3, $4, $5);",
+            rid_first, _uuid.UUID(n8n_client_id), "weekly_intelligence", shared_s3_key, now,
+        )
+        # Simulate second run trying same s3_key — must be silently skipped
+        await conn.execute(
+            "INSERT INTO reports (id, client_id, report_type, s3_key, created_at) "
+            "VALUES ($1, $2, $3, $4, $5) ON CONFLICT (client_id, s3_key) DO NOTHING;",
+            rid_second, _uuid.UUID(n8n_client_id), "weekly_intelligence", shared_s3_key, now,
+        )
+        # Only one row should exist
+        count = await conn.fetchval(
+            "SELECT count(*) FROM reports WHERE client_id = $1 AND s3_key = $2;",
+            _uuid.UUID(n8n_client_id), shared_s3_key,
+        )
+    finally:
+        await conn.close()
+    assert count == 1, f"Expected 1 row, got {count} — duplicate-send protection broken"
+
+    # Second run's report_id should return null (no row inserted for it)
+    resp = await http_client.get(
+        f"/api/reports/latest-for-client?client_id={n8n_client_id}&report_id={rid_second}",
+        headers={"X-N8N-Webhook-Secret": "test-internal-secret"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["report"] is None
+    assert data["s3_url"] is None
+
+
 # ---------------------------------------------------------------------------
 # Dashboard summary (< 300ms)
 # ---------------------------------------------------------------------------
