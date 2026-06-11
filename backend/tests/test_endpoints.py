@@ -278,39 +278,45 @@ async def test_churn_webhook_requires_internal_secret(http_client, monkeypatch):
 # Background dispatch timing (< 100ms)
 # ---------------------------------------------------------------------------
 
-async def test_analyze_returns_202_immediately(bearer_token):
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        start = time.monotonic()
-        resp = await ac.post(
-            "/insights/analyze",
-            headers={"Authorization": f"Bearer {bearer_token}"},
-        )
-        elapsed_ms = (time.monotonic() - start) * 1000
+async def test_analyze_returns_202_immediately(http_client, bearer_token, monkeypatch):
+    # Monkeypatch the background function to a no-op so we measure pure dispatch time,
+    # not agent execution: ASGITransport runs background tasks to completion before
+    # post() returns when the event loop is otherwise idle (isolation / CI).
+    async def _noop(**kw): pass
+    monkeypatch.setattr("app.routers.insights._run_voc_analysis", _noop)
+    start = time.monotonic()
+    resp = await http_client.post(
+        "/insights/analyze",
+        headers={"Authorization": f"Bearer {bearer_token}"},
+    )
+    elapsed_ms = (time.monotonic() - start) * 1000
     assert resp.status_code == 202
     assert resp.json()["status"] == "analysis_queued"
     assert elapsed_ms < 100, f"/insights/analyze took {elapsed_ms:.1f}ms — must be < 100ms"
 
 
-async def test_signals_analyze_returns_202_immediately(bearer_token):
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        start = time.monotonic()
-        resp = await ac.post(
-            "/signals/analyze",
-            headers={"Authorization": f"Bearer {bearer_token}"},
-        )
-        elapsed_ms = (time.monotonic() - start) * 1000
+async def test_signals_analyze_returns_202_immediately(http_client, bearer_token, monkeypatch):
+    async def _noop(**kw): pass
+    monkeypatch.setattr("app.routers.signals._run_comp_signal_analysis", _noop)
+    start = time.monotonic()
+    resp = await http_client.post(
+        "/signals/analyze",
+        headers={"Authorization": f"Bearer {bearer_token}"},
+    )
+    elapsed_ms = (time.monotonic() - start) * 1000
     assert resp.status_code == 202
     assert elapsed_ms < 100, f"/signals/analyze took {elapsed_ms:.1f}ms — must be < 100ms"
 
 
-async def test_journeys_analyze_returns_202_immediately(bearer_token):
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        start = time.monotonic()
-        resp = await ac.post(
-            "/journeys/analyze",
-            headers={"Authorization": f"Bearer {bearer_token}"},
-        )
-        elapsed_ms = (time.monotonic() - start) * 1000
+async def test_journeys_analyze_returns_202_immediately(http_client, bearer_token, monkeypatch):
+    async def _noop(**kw): pass
+    monkeypatch.setattr("app.routers.journeys._run_journey_analysis", _noop)
+    start = time.monotonic()
+    resp = await http_client.post(
+        "/journeys/analyze",
+        headers={"Authorization": f"Bearer {bearer_token}"},
+    )
+    elapsed_ms = (time.monotonic() - start) * 1000
     assert resp.status_code == 202
     assert elapsed_ms < 100, f"/journeys/analyze took {elapsed_ms:.1f}ms — must be < 100ms"
 
