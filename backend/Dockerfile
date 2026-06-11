@@ -25,6 +25,11 @@ COPY app ./app
 COPY pytest.ini .
 COPY tests ./tests
 
+# Migrations — the production deploy runs `alembic upgrade head` as a one-off
+# ECS task from this same image (only network path that reaches RDS in-VPC).
+COPY alembic.ini .
+COPY alembic ./alembic
+
 EXPOSE 8000
 
 # Local dev overrides this with --reload via docker-compose; prod uses --workers.
