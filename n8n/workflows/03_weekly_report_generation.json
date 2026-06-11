@@ -166,7 +166,7 @@
         "sendBody": true,
         "bodyContentType": "json",
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({\n  from: 'DataAutomated <reports@dataautomated.io>',\n  to: [$json.client_email || 'team@dataautomated.io'],\n  subject: '📊 Your Weekly Intelligence Report — ' + new Date().toISOString().slice(0,10),\n  html: '<h2>Your Weekly Intelligence Report is Ready</h2><p>Hi ' + ($json.client_name || 'Valued Client') + ',</p><p>Your weekly intelligence briefing covering the past 7 days is now available.</p><p><a href=\"' + $json.s3_url + '\" style=\"background:#4f46e5;color:white;padding:12px 24px;border-radius:6px;text-decoration:none;display:inline-block;\">Download Report</a></p><p>You can also view your live dashboard at <a href=\"https://app.dataautomated.io/dashboard\">app.dataautomated.io</a>.</p>'\n}) }}",
+        "jsonBody": "={{ JSON.stringify({\n  from: 'DataAutomated <reports@dataautomated.io>',\n  to: [$json.client_email || 'team@dataautomated.io'],\n  subject: '📊 Your Weekly Intelligence Report — ' + new Date().toISOString().slice(0,10),\n  html: '<h2>Your Weekly Intelligence Report is Ready</h2><p>Hi ' + ($json.client_name || 'Valued Client') + ',</p><p>Your weekly intelligence briefing covering the past 7 days is now available. Download it from your reports page — each download uses a freshly minted secure link.</p><p><a href=\"https://app.dataautomated.io/reports\" style=\"background:#4f46e5;color:white;padding:12px 24px;border-radius:6px;text-decoration:none;display:inline-block;\">Download Report</a></p><p>You can also view your live dashboard at <a href=\"https://app.dataautomated.io/dashboard\">app.dataautomated.io</a>.</p>'\n}) }}",
         "options": {}
       },
       "id": "a3b4c5d6-0003-0003-0003-000000000008",
@@ -250,7 +250,7 @@
     "callerPolicy": "workflowsFromSameOwner"
   },
   "pinData": {},
-  "versionId": "a3b4c5d6-0003-0003-0003-000000000004",
+  "versionId": "a3b4c5d6-0003-0003-0003-000000000005",
   "meta": {
     "instanceId": "dataautomated-local"
   },

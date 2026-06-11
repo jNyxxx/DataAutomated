@@ -71,6 +71,7 @@ services:
       N8N_HOST: ${N8N_HOST:-localhost}
       N8N_PORT: ${N8N_PORT:-5678}
       N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
+      N8N_ENV_VARS_ALLOW_ALL: "true"
       # Workflows reach the backend over the compose network via {{$env.BACKEND_URL}}.
       BACKEND_URL: http://backend:8000
     ports:
