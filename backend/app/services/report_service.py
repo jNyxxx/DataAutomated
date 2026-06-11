@@ -17,6 +17,21 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
+
+def _s3_client():
+    """Return a boto3 S3 client scoped to the configured region and optional endpoint.
+
+    When `settings.s3_endpoint_url` is set (local minio), path-style addressing is
+    forced because minio doesn't support DNS-wildcard virtual-hosted buckets.
+    In production the field is None and the default AWS SDK behaviour applies.
+    """
+    kwargs: dict = {"region_name": settings.aws_region}
+    if settings.s3_endpoint_url:
+        kwargs["endpoint_url"] = settings.s3_endpoint_url
+        from botocore.config import Config as _BotoConfig
+        kwargs["config"] = _BotoConfig(signature_version="s3v4", s3={"addressing_style": "path"})
+    return boto3.client("s3", **kwargs)
+
 # --------------------------------------------------------------------------- #
 # HTML template
 # --------------------------------------------------------------------------- #
@@ -237,7 +252,7 @@ def presign_report_url(key: str | None, expires_in: int = 604800) -> str | None:
     if not key:
         return None
     try:
-        s3 = boto3.client("s3", region_name=settings.aws_region)
+        s3 = _s3_client()
         return s3.generate_presigned_url(
             "get_object",
             Params={"Bucket": settings.s3_reports_bucket, "Key": key},
@@ -250,8 +265,7 @@ def presign_report_url(key: str | None, expires_in: int = 604800) -> str | None:
 
 def _upload_to_s3(data: bytes, key: str) -> str | None:
     bucket = settings.s3_reports_bucket
-    region = settings.aws_region
-    s3 = boto3.client("s3", region_name=region)
+    s3 = _s3_client()
     content_type = "application/pdf" if data[:4] == b"%PDF" else "text/html"
     try:
         s3.put_object(

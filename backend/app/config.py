@@ -40,6 +40,9 @@ class Settings(BaseSettings):
     resend_api_key: str = ""
     aws_region: str = "us-east-1"
     s3_reports_bucket: str = "dataautomated-reports"
+    # Local S3 substitute only (minio in docker-compose). Leave blank/unset in production —
+    # the real AWS SDK credential chain is used when this is None.
+    s3_endpoint_url: str | None = None
 
     # ---- CORS (CLAUDE.md §10) ----
     cors_origins: list[str] = [
