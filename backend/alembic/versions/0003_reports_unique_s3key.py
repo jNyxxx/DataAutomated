@@ -26,6 +26,11 @@ Downgrade removes the constraint (index drops automatically).
 from alembic import op
 from sqlalchemy import text
 
+revision = "0003"
+down_revision = "0002"
+branch_labels = None
+depends_on = None
+
 
 def upgrade() -> None:
     # Idempotent: skip if the constraint already exists (e.g. applied manually in dev).
