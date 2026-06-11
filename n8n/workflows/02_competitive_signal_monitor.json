@@ -77,7 +77,8 @@
       "name": "Run CompSig Agent",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [900, 300]
+      "position": [900, 300],
+      "onError": "continueRegularOutput"
     },
     {
       "parameters": {
@@ -98,7 +99,8 @@
       "name": "Fetch Latest Signals",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1120, 300]
+      "position": [1120, 300],
+      "onError": "continueRegularOutput"
     },
     {
       "parameters": {
@@ -109,7 +111,8 @@
       "name": "Split Signals",
       "type": "n8n-nodes-base.splitOut",
       "typeVersion": 1,
-      "position": [1340, 300]
+      "position": [1340, 300],
+      "onError": "continueRegularOutput"
     },
     {
       "parameters": {
@@ -122,7 +125,7 @@
           "conditions": [
             {
               "id": "cond-critical",
-              "leftValue": "={{ $json.urgency }}",
+              "leftValue": "={{ $json.urgency || '' }}",
               "rightValue": "critical",
               "operator": {
                 "type": "string",
@@ -131,8 +134,8 @@
             },
             {
               "id": "cond-unread",
-              "leftValue": "={{ $json.is_read }}",
-              "rightValue": false,
+              "leftValue": "={{ $json.is_read === false }}",
+              "rightValue": true,
               "operator": {
                 "type": "boolean",
                 "operation": "equals"
@@ -158,7 +161,7 @@
           "mode": "name"
         },
         "messageType": "block",
-        "blocksUi": "=[\n  {\n    \"type\": \"header\",\n    \"text\": { \"type\": \"plain_text\", \"text\": \"🚨 Critical Competitive Signal\" }\n  },\n  {\n    \"type\": \"section\",\n    \"fields\": [\n      { \"type\": \"mrkdwn\", \"text\": \"*Competitor:*\\n{{ $json.competitor_name }}\" },\n      { \"type\": \"mrkdwn\", \"text\": \"*Type:*\\n{{ $json.signal_type }}\" },\n      { \"type\": \"mrkdwn\", \"text\": \"*Client:*\\n{{ $('Split Clients').item.json.name }}\" },\n      { \"type\": \"mrkdwn\", \"text\": \"*Source:*\\n{{ $json.signal_source }}\" }\n    ]\n  },\n  {\n    \"type\": \"section\",\n    \"text\": { \"type\": \"mrkdwn\", \"text\": \"*Strategic Context:*\\n{{ $json.strategic_context }}\" }\n  }\n]",
+        "blocksUi": "={{ JSON.stringify([\n  { type: 'header', text: { type: 'plain_text', text: '🚨 Critical Competitive Signal' } },\n  { type: 'section', fields: [\n    { type: 'mrkdwn', text: '*Competitor:*\\n' + ($json.competitor_name || '—') },\n    { type: 'mrkdwn', text: '*Type:*\\n' + ($json.signal_type || '—') },\n    { type: 'mrkdwn', text: '*Client:*\\n' + ($('Split Clients').item.json.name || '—') },\n    { type: 'mrkdwn', text: '*Source:*\\n' + ($json.signal_source || '—') }\n  ] },\n  { type: 'section', text: { type: 'mrkdwn', text: '*Strategic Context:*\\n' + ($json.strategic_context || '—') } }\n]) }}",
         "otherOptions": {}
       },
       "id": "a2b3c4d5-0002-0002-0002-000000000008",
@@ -166,6 +169,7 @@
       "type": "n8n-nodes-base.slack",
       "typeVersion": 2.2,
       "position": [1780, 180],
+      "onError": "continueRegularOutput",
       "credentials": {
         "slackApi": {
           "id": "slack-credential-id",
@@ -259,7 +263,7 @@
     "callerPolicy": "workflowsFromSameOwner"
   },
   "pinData": {},
-  "versionId": "a2b3c4d5-0002-0002-0002-000000000000",
+  "versionId": "a2b3c4d5-0002-0002-0002-000000000001",
   "meta": {
     "instanceId": "dataautomated-local"
   },

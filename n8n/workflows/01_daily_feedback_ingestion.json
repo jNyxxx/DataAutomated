@@ -77,7 +77,8 @@
       "name": "Trigger Ingest",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [900, 300]
+      "position": [900, 300],
+      "onError": "continueRegularOutput"
     },
     {
       "parameters": {
@@ -90,7 +91,7 @@
           "conditions": [
             {
               "id": "cond-ingestion-count",
-              "leftValue": "={{ $json.ingestion_count }}",
+              "leftValue": "={{ $json.ingestion_count || 0 }}",
               "rightValue": 0,
               "operator": {
                 "type": "number",
@@ -135,7 +136,8 @@
       "name": "Run VoC Agent",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1340, 200]
+      "position": [1340, 200],
+      "onError": "continueRegularOutput"
     },
     {
       "parameters": {},
@@ -182,7 +184,7 @@
     "callerPolicy": "workflowsFromSameOwner"
   },
   "pinData": {},
-  "versionId": "a1b2c3d4-0001-0001-0001-000000000000",
+  "versionId": "a1b2c3d4-0001-0001-0001-000000000001",
   "meta": {
     "instanceId": "dataautomated-local"
   },

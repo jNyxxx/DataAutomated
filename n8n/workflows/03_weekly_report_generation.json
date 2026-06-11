@@ -80,7 +80,8 @@
       "name": "Trigger Report Generation",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [900, 300]
+      "position": [900, 300],
+      "onError": "continueRegularOutput"
     },
     {
       "parameters": {
@@ -113,7 +114,8 @@
       "name": "Fetch Generated Report",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1340, 300]
+      "position": [1340, 300],
+      "onError": "continueRegularOutput"
     },
     {
       "parameters": {
@@ -248,7 +250,7 @@
     "callerPolicy": "workflowsFromSameOwner"
   },
   "pinData": {},
-  "versionId": "a3b4c5d6-0003-0003-0003-000000000003",
+  "versionId": "a3b4c5d6-0003-0003-0003-000000000004",
   "meta": {
     "instanceId": "dataautomated-local"
   },
