@@ -43,7 +43,7 @@ export function middleware(request: NextRequest) {
 
   if (PUBLIC_PATHS.some((p) => pathname.startsWith(p))) {
     if (token && !isTokenExpired(token) && pathname === '/login') {
-      return NextResponse.redirect(new URL('/dashboard', request.url));
+      return NextResponse.redirect(new URL('/', request.url));
     }
     return NextResponse.next({
       request: {
@@ -60,10 +60,6 @@ export function middleware(request: NextRequest) {
       response.cookies.set('token', '', { maxAge: 0, path: '/' });
     }
     return response;
-  }
-
-  if (pathname === '/') {
-    return NextResponse.redirect(new URL('/dashboard', request.url));
   }
 
   return NextResponse.next({

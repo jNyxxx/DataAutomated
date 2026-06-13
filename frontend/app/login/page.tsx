@@ -51,7 +51,7 @@ export default function LoginPage() {
         }
         return;
       }
-      router.push('/dashboard');
+      router.push('/');
       router.refresh();
     } catch {
       setError('Could not reach the server. Check your connection or try again shortly.');

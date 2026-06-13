@@ -57,6 +57,7 @@ pgdata/
 *.local
 
 # ---- Local engineering artifacts (not part of the §4 source tree) ----
+claude-design-export/   # temporary design import source — migration complete; keep off git
 output/
 # Untracked planning/scratch — keep commits clean. NOTE: scoped patterns only; the project's
 # tracked .md docs (README, CLAUDE, MASTER_ROADMAP, architecture docs, …) are intentionally NOT ignored.
