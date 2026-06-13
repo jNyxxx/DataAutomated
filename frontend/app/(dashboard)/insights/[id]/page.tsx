@@ -36,7 +36,7 @@ export default async function InsightDetailPage({ params }: InsightDetailPagePro
           <CardContent className="pt-6">
             <p className="text-sm text-muted-foreground">Sentiment</p>
             <div className="flex items-center gap-2 mt-1">
-              <Badge variant={insight.sentiment_label === 'positive' ? 'positive' : insight.sentiment_label === 'negative' ? 'negative' : 'secondary'}>
+              <Badge variant={insight.sentiment_label === 'positive' ? 'success' : insight.sentiment_label === 'negative' ? 'critical' : 'neutral'}>
                 {insight.sentiment_label}
               </Badge>
               <span className="text-lg font-bold tabular-nums">

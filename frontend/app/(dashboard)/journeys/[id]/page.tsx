@@ -29,7 +29,7 @@ export default async function JourneyDetailPage({ params }: JourneyDetailPagePro
             Detailed journey view coming soon. The journey agent populates this via the
             /journeys/latest endpoint — a per-ID route will be wired once the backend exposes it.
           </p>
-          <Badge variant="secondary" className="mt-4">Stub</Badge>
+          <Badge variant="neutral" className="mt-4">Stub</Badge>
         </CardContent>
       </Card>
     </div>

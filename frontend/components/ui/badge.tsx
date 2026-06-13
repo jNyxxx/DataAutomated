@@ -1,37 +1,51 @@
-import { type HTMLAttributes } from 'react';
-import { cva, type VariantProps } from 'class-variance-authority';
+import React from 'react';
 import { cn } from '@/lib/utils';
 
-const badgeVariants = cva(
-  'inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold transition-colors',
-  {
-    variants: {
-      variant: {
-        default: 'border-transparent bg-primary text-primary-foreground',
-        secondary: 'border-transparent bg-muted text-muted-foreground',
-        destructive: 'border-transparent bg-destructive text-destructive-foreground',
-        outline: 'text-foreground',
-        positive: 'border-transparent bg-green-500/20 text-green-400',
-        negative: 'border-transparent bg-red-500/20 text-red-400',
-        warning: 'border-transparent bg-yellow-500/20 text-yellow-400',
-        critical: 'border-transparent bg-red-600/20 text-red-300',
-        high: 'border-transparent bg-orange-500/20 text-orange-400',
-        medium: 'border-transparent bg-yellow-500/20 text-yellow-400',
-        low: 'border-transparent bg-green-500/20 text-green-400',
-      },
-    },
-    defaultVariants: {
-      variant: 'default',
-    },
-  },
-);
+export const BADGE_STYLES = {
+  neutral: "bg-slate-700/40 text-slate-300",
+  success: "bg-green-500/10 text-green-400",
+  warning: "bg-amber-500/10 text-amber-400",
+  critical: "bg-red-500/10 text-red-400",
+  high: "bg-orange-500/10 text-orange-400",
+  info: "bg-sky-500/10 text-sky-400",
+  voc: "bg-teal-500/10 text-teal-300",
+  comp: "bg-rose-500/10 text-rose-300",
+  jrn: "bg-blue-500/10 text-blue-300",
+  system: "bg-slate-500/15 text-slate-300",
+};
 
-export interface BadgeProps
-  extends HTMLAttributes<HTMLDivElement>,
-    VariantProps<typeof badgeVariants> {}
+export const DOT_STYLES = {
+  neutral: "bg-slate-400",
+  success: "bg-green-400",
+  warning: "bg-amber-400",
+  critical: "bg-red-400",
+  high: "bg-orange-400",
+  info: "bg-sky-400",
+  voc: "bg-teal-400",
+  comp: "bg-rose-400",
+  jrn: "bg-blue-400",
+  system: "bg-slate-400",
+};
 
-function Badge({ className, variant, ...props }: BadgeProps) {
-  return <div className={cn(badgeVariants({ variant }), className)} {...props} />;
+export type BadgeVariant = keyof typeof BADGE_STYLES;
+
+export interface BadgeProps extends React.HTMLAttributes<HTMLSpanElement> {
+  variant?: BadgeVariant;
+  dot?: boolean;
 }
 
-export { Badge, badgeVariants };
+export function Badge({ children, variant = 'neutral', dot = false, className, ...props }: BadgeProps) {
+  return (
+    <span 
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium leading-5 whitespace-nowrap",
+        BADGE_STYLES[variant],
+        className
+      )}
+      {...props}
+    >
+      {dot && <span className={cn("size-1.5 rounded-full", DOT_STYLES[variant])} />}
+      {children}
+    </span>
+  );
+}

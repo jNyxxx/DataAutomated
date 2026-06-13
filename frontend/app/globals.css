@@ -3,49 +3,57 @@
 @tailwind utilities;
 
 @layer base {
-  :root {
-    /* Dark slate theme — always dark, class="dark" on <html> */
-    --background: 222 47% 11%;
-    --foreground: 213 31% 91%;
-
-    --card: 222 47% 13%;
-    --card-foreground: 213 31% 91%;
-
-    --primary: 210 100% 66%;
-    --primary-foreground: 222 47% 11%;
-
-    --muted: 217 33% 17%;
-    --muted-foreground: 215 20% 65%;
-
-    --accent: 210 100% 66%;
-    --accent-foreground: 222 47% 11%;
-
-    --destructive: 0 72% 58%;
-    --destructive-foreground: 213 31% 91%;
-
-    --border: 217 33% 20%;
-    --input: 217 33% 17%;
-    --ring: 210 100% 66%;
-
-    --radius: 0.5rem;
+  body {
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #334155 transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: #334155;
+    border-radius: 9999px;
   }
 }
 
-@layer base {
-  * {
-    @apply border-border;
+@layer utilities {
+  .spin {
+    animation: spin .8s linear infinite;
   }
-  body {
-    @apply bg-background text-foreground antialiased;
+  .pulse {
+    animation: pulse 1.3s ease-in-out infinite;
   }
-  ::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
+  .ov-fade {
+    animation: ovFade .18s ease both;
   }
-  ::-webkit-scrollbar-track {
-    @apply bg-muted;
+  .ov-slide {
+    animation: ovSlide .2s ease-out both;
   }
-  ::-webkit-scrollbar-thumb {
-    @apply bg-border rounded-full;
+  .toast-in {
+    animation: toastIn .2s ease both;
   }
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: .4; }
+}
+@keyframes ovFade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes ovSlide {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+@keyframes toastIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
 }

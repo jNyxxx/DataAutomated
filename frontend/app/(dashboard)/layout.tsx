@@ -7,11 +7,16 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   if (!token) redirect('/login');
 
   return (
-    <div className="flex min-h-screen">
-      <Sidebar />
-      <main className="ml-60 flex-1 p-8 min-w-0">
-        {children}
-      </main>
+    <div className="h-full flex flex-col">
+
+      <div className="flex h-[calc(100%-41px)] relative">
+        <Sidebar />
+        <main className="min-w-0 flex-1 overflow-y-auto">
+          <div className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
+            {children}
+          </div>
+        </main>
+      </div>
     </div>
   );
 }

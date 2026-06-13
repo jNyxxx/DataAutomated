@@ -24,7 +24,7 @@ export default async function SignalDetailPage({ params }: SignalDetailPageProps
       <Header
         title={signal.competitor_name}
         description={`Detected ${format(new Date(signal.detected_at), 'MMM d, yyyy · h:mm a')}`}
-        actions={<Badge variant={signal.urgency}>{signal.urgency}</Badge>}
+        actions={<Badge variant={(signal.urgency === 'medium' ? 'warning' : signal.urgency) as any}>{signal.urgency}</Badge>}
       />
 
       <div className="grid grid-cols-3 gap-4 mb-6">
