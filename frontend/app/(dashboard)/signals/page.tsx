@@ -1,12 +1,13 @@
 import { getTokenServerSide } from '@/lib/auth';
 import { fetchSignals } from '@/lib/api';
 import { Header } from '@/components/layout/Header';
-import { Velocity } from '@/components/ui/charts';
+import { Sparkline, Velocity } from '@/components/ui/charts';
 import { Badge, BADGE_STYLES } from '@/components/ui/badge';
 import { SearchWell } from '@/components/ui/search-well';
 import { FilterWell } from '@/components/ui/filter-well';
 import { Button } from '@/components/ui/button';
 import { Share, Check } from 'lucide-react';
+import { AddCompetitorButton } from '@/components/signals/SignalActions';
 
 const TINT = { voc: "#2dd4bf", comp: "#f43f5e", jrn: "#3b82f6", system: "#94a3b8" } as const;
 
@@ -90,7 +91,7 @@ export default async function SignalsPage() {
           <section className="rounded-xl bg-slate-800 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.05)] p-5">
             <div className="mb-3 flex items-center justify-between gap-3">
               <h2 className="truncate text-sm font-semibold text-white">Tracked competitors</h2>
-              <button className="inline-flex items-center gap-1 rounded text-xs font-medium text-blue-400 transition-[transform,colors] duration-200 ease-out active:scale-95 hover:text-blue-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">+ Add</button>
+              <AddCompetitorButton />
             </div>
             <ul className="divide-y divide-white/5">
               {tracked.length === 0 ? (

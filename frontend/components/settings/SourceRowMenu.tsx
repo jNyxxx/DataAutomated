@@ -5,7 +5,7 @@ import { MoreVertical, RefreshCw, Settings2, Trash2 } from "lucide-react";
 import { cn, focusRing } from "@/lib/utils";
 import { useToast } from "@/components/ui/Toast";
 
-import { removeSourceAction, resyncSourceAction } from "@/app/(dashboard)/settings/actions";
+import { removeSourceAction, resyncSourceAction, editSourceSettingsAction } from "@/app/(dashboard)/settings/actions";
 
 /**
  * Per-source ··· menu. The destructive "Disconnect" is a two-step guard:
@@ -71,13 +71,31 @@ export function SourceRowMenu({
     }
   };
 
+  const handleEdit = async () => {
+    setOpen(false);
+    if (onEdit) {
+      onEdit();
+      return;
+    }
+    setLoading(true);
+    try {
+      await editSourceSettingsAction(sourceId);
+      toast(`${sourceName} settings updated`, "success");
+    } catch {
+      toast(`Failed to update ${sourceName} settings`, "error");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div ref={ref} className="relative inline-block">
       <button
         onClick={() => setOpen((o) => !o)}
         aria-haspopup="menu"
         aria-expanded={open}
-        className={cn("grid size-8 place-items-center rounded-lg text-slate-400 transition-[transform,colors] duration-200 ease-out active:scale-95 hover:bg-slate-700 hover:text-white", focusRing)}
+        disabled={loading}
+        className={cn("grid size-8 place-items-center rounded-lg text-slate-400 transition-[transform,colors] duration-200 ease-out active:scale-95 hover:bg-slate-700 hover:text-white disabled:opacity-50", focusRing)}
       >
         <MoreVertical className="size-4" />
       </button>
@@ -97,10 +115,7 @@ export function SourceRowMenu({
           </button>
           <button
             role="menuitem"
-            onClick={() => {
-              setOpen(false);
-              onEdit?.();
-            }}
+            onClick={handleEdit}
             className={cn("flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm text-slate-300 transition-[transform,colors] duration-200 ease-out active:scale-[0.98] hover:bg-slate-700/60 hover:text-white", focusRing)}
           >
             <Settings2 className="size-4 text-slate-400" />

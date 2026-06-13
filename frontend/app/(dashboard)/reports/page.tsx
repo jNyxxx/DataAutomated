@@ -5,12 +5,20 @@ import { SearchInput, FilterSelect, DateRangeButton } from "@/components/ui/Fiel
 import { EditionChart } from "@/components/reports/EditionChart";
 import { GeneratingReportCard } from "@/components/reports/GeneratingReportCard";
 import { DownloadPdfButton } from "@/components/reports/DownloadPdfButton";
+import { OpenFullReportButton, ShareToSlackButton, ExportAllButton } from "@/components/reports/ReportActions";
 import { focusRing } from "@/lib/utils";
 import { fetchReports } from "@/lib/api";
 import { getTokenServerSide } from "@/lib/auth";
 import { type Report } from "@/lib/types";
 import { format } from "date-fns";
 
+function safeFormatDate(dStr: string) {
+  try {
+    return format(new Date(dStr), "MMM d, yyyy");
+  } catch {
+    return dStr;
+  }
+}
 import {
   type Briefing,
   type ReportStatus,
@@ -60,7 +68,7 @@ export default async function ReportsPage() {
     id: r.id,
     title: `${r.report_type === 'system' ? 'Executive' : r.report_type} Report`,
     stream: r.report_type || "system",
-    period: r.period_start && r.period_end ? `${r.period_start} to ${r.period_end}` : "Monthly",
+    period: r.period_start && r.period_end ? `${safeFormatDate(r.period_start)} to ${safeFormatDate(r.period_end)}` : "Monthly",
     generated_at: r.created_at ? format(new Date(r.created_at), "MMM d, yyyy") : "Unknown",
     pages: null,
     status: r.s3_key ? "ready" : "generating",
@@ -73,7 +81,7 @@ export default async function ReportsPage() {
     generated_at: latestReal.created_at ? format(new Date(latestReal.created_at), "h:mm a") : "",
     summary: "",
     highlights: [],
-    stats: { pages: 0, sources: 0, signals: 0, period: latestReal.period_start ? `${latestReal.period_start} to ${latestReal.period_end}` : "" },
+    stats: { pages: 0, sources: 0, signals: 0, period: latestReal.period_start ? `${safeFormatDate(latestReal.period_start)} to ${safeFormatDate(latestReal.period_end)}` : "" },
     volume: [],
     delivery: [{ name: "Leadership", role: "Channel", channel: "#exec-briefing" }],
     next_send: "Next Monday",
@@ -201,12 +209,13 @@ function LatestBriefing({ briefing }: { briefing: Briefing | null }) {
       </div>
 
       <div className="mt-5 flex flex-wrap gap-2">
-        <Button variant="primary">Open full report</Button>
-        {briefing && <DownloadPdfButton reportId={briefing.id} />}
-        <Button variant="default">
-          <Share2 className="size-4" />
-          Share to Slack
-        </Button>
+        {briefing && (
+          <>
+            <OpenFullReportButton reportId={briefing.id} />
+            <DownloadPdfButton reportId={briefing.id} />
+            <ShareToSlackButton reportId={briefing.id} />
+          </>
+        )}
       </div>
     </section>
   );
@@ -244,9 +253,6 @@ function DeliveryCard({ briefing }: { briefing: Briefing | null }) {
     <section className="rounded-xl bg-slate-800 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.05)] p-5">
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold text-white">Delivery</h3>
-        <button className={`rounded text-xs font-medium text-blue-400 hover:text-blue-300 ${focusRing}`}>
-          Edit
-        </button>
       </div>
       <ul className="mt-3 space-y-2.5"></ul>
       <div className="mt-3 flex items-center justify-between border-t border-white/5 pt-3 text-sm">
@@ -267,9 +273,7 @@ function ReportLibrary({ reports }: { reports: any[] }) {
           <h3 className="truncate text-sm font-semibold text-white">Report Library</h3>
           <p className="truncate text-xs text-slate-400">Generated + scheduled</p>
         </div>
-        <button className={`rounded text-xs font-medium text-blue-400 hover:text-blue-300 ${focusRing}`}>
-          Export all
-        </button>
+        <ExportAllButton />
       </div>
 
       {/* Horizontal scroll keeps the table usable on mobile without a redesign. */}
@@ -319,11 +323,7 @@ function ReportLibrary({ reports }: { reports: any[] }) {
                       </div>
                     ) : r.status === "generating" ? (
                       <span className="text-xs text-slate-400">~2 min</span>
-                    ) : (
-                      <button className={`rounded text-xs font-medium text-slate-400 hover:text-slate-200 ${focusRing}`}>
-                        Edit
-                      </button>
-                    )}
+                    ) : null}
                   </td>
                 </tr>
               );
@@ -343,9 +343,6 @@ function Templates() {
           <h3 className="truncate text-sm font-semibold text-white">Report Templates</h3>
           <p className="truncate text-xs text-slate-400">Start from a structure</p>
         </div>
-        <button className={`rounded text-xs font-medium text-blue-400 hover:text-blue-300 ${focusRing}`}>
-          + Custom
-        </button>
       </div>
       <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
         {TEMPLATES.map((t) => (
@@ -370,9 +367,6 @@ function Schedule() {
     <section className="rounded-xl bg-slate-800 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.05)] p-5">
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold text-white">Schedule</h3>
-        <button className={`rounded text-xs font-medium text-blue-400 hover:text-blue-300 ${focusRing}`}>
-          Manage
-        </button>
       </div>
       <dl className="mt-3 divide-y divide-white/5">
         {SCHEDULE.map(([k, v]) => (

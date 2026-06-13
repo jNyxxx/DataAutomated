@@ -6,7 +6,7 @@ import { Badge, BADGE_STYLES } from '@/components/ui/badge';
 import { SearchWell } from '@/components/ui/search-well';
 import { FilterWell } from '@/components/ui/filter-well';
 import { Button } from '@/components/ui/button';
-import { Download } from 'lucide-react';
+import { ExportVocButton } from '@/components/insights/VocActions';
 
 const TINT = { voc: "#2dd4bf", comp: "#f43f5e", jrn: "#3b82f6", system: "#94a3b8" } as const;
 
@@ -47,7 +47,6 @@ export default async function InsightsPage() {
       <Header
         title="Voice of Customer"
         description="Sentiment, themes & churn signals · Acme SaaS Inc."
-        actions={<SearchWell placeholder="Search insights…" />}
       />
 
 
@@ -144,9 +143,7 @@ export default async function InsightsPage() {
             <h2 className="truncate text-sm font-semibold text-white">Raw feedback sample</h2>
             <p className="truncate text-xs text-slate-400">processed in transit · not persisted</p>
           </div>
-          <Button variant="ghost" className="text-teal-400 hover:text-teal-300">
-            <Download className="size-4 mr-2" /> Export
-          </Button>
+          <ExportVocButton />
         </div>
         <div className="py-6 text-center text-sm text-slate-400 border border-dashed border-white/10 rounded-lg mt-4">
           No raw feedback samples available.
