@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DataAutomated.io — Wireframes</title>
+<link rel="stylesheet" href="wireframes.css">
+
+<!-- ===== FEEL TWEAKS — expressive overrides driven by the Tweaks panel ===== -->
+<style id="feel-tweaks">
+  /* grain becomes theme-driven so dark substrates can show light specks */
+  body::before {
+    background-image: radial-gradient(var(--grain-color, rgba(44,43,39,.025)) 1px, transparent 1px);
+    background-size: var(--grain-size, 5px) var(--grain-size, 5px);
+  }
+
+  /* stroke energy → border weight + a gentle pinned-to-corkboard tilt */
+  :root {
+    --hand: .38;
+    --bw:   calc(1.4px + var(--hand) * 2.1px);
+    --tilt: calc(var(--hand) * .7deg);
+  }
+  .side, .panel, .kpi, .topbar, .lane-head { border-width: var(--bw); }
+  .kpi:nth-child(odd),  .panel:nth-child(odd)  { transform: rotate(var(--tilt)); }
+  .kpi:nth-child(even), .panel:nth-child(even) { transform: rotate(calc(var(--tilt) * -1)); }
+
+  /* ---------- SUBSTRATE: structural vars always apply ---------- */
+  body[data-substrate="newsprint"] { --grain-color: rgba(44,43,39,.025); }
+
+  body[data-substrate="blueprint"] {
+    --paper:#13243f; --ink:#dde9ff; --ink-soft:#9db4d6; --ink-faint:#6c87b2;
+    --fill:#1b3052; --fill-2:#274069; --fill-3:#1f375d;
+    --line:#bcd0f2; --line-soft:#52719e;
+    --grain-color: rgba(180,205,245,.05);
+  }
+  body[data-substrate="whiteboard"] {
+    --paper:#fafbfb; --ink:#1d2024; --ink-soft:#5c616a; --ink-faint:#9aa0a8;
+    --fill:#ffffff; --fill-2:#eceef1; --fill-3:#f4f5f7;
+    --line:#2a2d33; --line-soft:#c3c8cf;
+    --grain-color: rgba(0,0,0,0);
+  }
+  body[data-substrate="carbon"] {
+    --paper:#1b1c1f; --ink:#e7e6e1; --ink-soft:#a2a29b; --ink-faint:#6e6e68;
+    --fill:#26282c; --fill-2:#313338; --fill-3:#2a2c31;
+    --line:#d9d7cd; --line-soft:#54565d;
+    --grain-color: rgba(230,230,220,.035);
+  }
+  /* accent palettes — skipped when the toolbar's color switch is off (mono) */
+  body[data-substrate="blueprint"]:not(.mono) {
+    --voc:#4fd2c7; --voc-wash:rgba(79,210,199,.16); --voc-line:#4fd2c7;
+    --comp:#ff9d6e; --comp-wash:rgba(255,157,110,.16); --comp-line:#ff9d6e;
+    --jrn:#86b0ff; --jrn-wash:rgba(134,176,255,.16); --jrn-line:#86b0ff;
+    --ok:#5fd6a0; --warn:#f0c060; --crit:#ff8a6a;
+  }
+  body[data-substrate="whiteboard"]:not(.mono) {
+    --voc:#00a98f; --voc-wash:rgba(0,169,143,.13); --voc-line:#00a98f;
+    --comp:#e5482a; --comp-wash:rgba(229,72,42,.13); --comp-line:#e5482a;
+    --jrn:#2563eb; --jrn-wash:rgba(37,99,235,.13); --jrn-line:#2563eb;
+    --ok:#1f9d57; --warn:#cf8a14; --crit:#e5482a;
+  }
+  body[data-substrate="carbon"]:not(.mono) {
+    --voc:#33ccae; --voc-wash:rgba(51,204,174,.15); --voc-line:#33ccae;
+    --comp:#ff6f4d; --comp-wash:rgba(255,111,77,.15); --comp-line:#ff6f4d;
+    --jrn:#6f9dff; --jrn-wash:rgba(111,157,255,.15); --jrn-line:#6f9dff;
+    --ok:#46c98a; --warn:#e0b34e; --crit:#ff6f4d;
+  }
+
+  /* ---------- FIDELITY: the realism stage ---------- */
+  /* Napkin — roughest: wobblier corners, denser grain, dashed shells */
+  body[data-fidelity="napkin"] {
+    --radius:    240px 18px 232px 22px / 22px 230px 18px 244px;
+    --radius-2:  18px 236px 24px 240px / 236px 22px 246px 18px;
+    --radius-sm: 22px 110px 26px 100px / 100px 24px 112px 22px;
+    --grain-size: 4px;
+  }
+  body[data-fidelity="napkin"] .panel,
+  body[data-fidelity="napkin"] .kpi,
+  body[data-fidelity="napkin"] .side,
+  body[data-fidelity="napkin"] .topbar { border-style: dashed; }
+
+  /* Hi-Fi — crisp product mockup: uniform corners, soft drop shadows, clean type, no grain, no tilt */
+  body[data-fidelity="hifi"] {
+    --radius: 12px; --radius-2: 12px; --radius-sm: 9px;
+    --shadow:    0 8px 24px rgba(20,22,35,.12);
+    --shadow-sm: 0 3px 10px rgba(20,22,35,.09);
+    --tilt: 0deg;
+  }
+  body[data-fidelity="hifi"]::before { background-image: none; }
+  body[data-fidelity="hifi"] .canvas,
+  body[data-fidelity="hifi"] .canvas * {
+    font-family: "Helvetica Neue", -apple-system, system-ui, "Segoe UI", sans-serif !important;
+    letter-spacing: -0.01em;
+  }
+
+  /* ===== floating Feel panel (hand-drawn, matches the toolbar) ===== */
+  .ftk { position:fixed; right:18px; bottom:18px; z-index:2147483646; width:250px;
+    background:#26251f; color:#e8e6dc; border:2px solid #000;
+    border-radius:18px 90px 22px 80px / 80px 20px 90px 18px;
+    box-shadow:4px 4px 0 rgba(0,0,0,.32); font-family:'Kalam',cursive;
+    display:none; flex-direction:column; overflow:hidden; }
+  .ftk.open { display:flex; }
+  .ftk-hd { display:flex; align-items:center; justify-content:space-between;
+    padding:11px 11px 9px 16px; cursor:move; border-bottom:1.5px dashed #45443c; }
+  .ftk-hd .ti { line-height:1.05; }
+  .ftk-hd b { font-size:16px; letter-spacing:.3px; }
+  .ftk-hd b .dot { color:#7fd6c4; }
+  .ftk-hd .sub { display:block; font-size:10.5px; color:#85837a; font-style:italic; margin-top:1px; }
+  .ftk-x { border:0; background:transparent; color:#bdbbb0; font-size:14px; cursor:pointer;
+    width:24px; height:24px; border-radius:8px; flex:none; }
+  .ftk-x:hover { background:#34332c; color:#fff; }
+  .ftk-body { padding:13px 16px 16px; display:flex; flex-direction:column; gap:16px; }
+  .ftk-ctl { display:flex; flex-direction:column; gap:7px; }
+  .ftk-lab { font-size:11px; color:#9c9a90; text-transform:uppercase; letter-spacing:.6px; }
+  .ftk-hint { font-size:11.5px; color:#bdbbb0; font-style:italic; min-height:15px; }
+
+  .ftk-seg { display:flex; border:1.5px solid #57564e; border-radius:10px 6px 12px 7px / 7px 12px 6px 10px; overflow:hidden; }
+  .ftk-seg button { flex:1; border:0; border-right:1.5px solid #57564e; padding:7px 4px;
+    font-size:13px; background:transparent; color:#d8d6cc; cursor:pointer; font-family:'Kalam',cursive; }
+  .ftk-seg button:last-child { border-right:0; }
+  .ftk-seg button:hover { background:#34332c; color:#fff; }
+  .ftk-seg button[aria-selected="true"] { background:#7fd6c4; color:#1d1c17; font-weight:700; }
+
+  .ftk-sw-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  .ftk-sw { position:relative; height:44px; border:2px solid #57564e; cursor:pointer; overflow:hidden;
+    border-radius:9px 5px 11px 6px / 6px 11px 5px 9px; display:flex; align-items:flex-end; padding:5px 8px; }
+  .ftk-sw:hover { border-color:#8a887e; }
+  .ftk-sw[aria-selected="true"] { border-color:#7fd6c4; box-shadow:0 0 0 2px #7fd6c4; }
+  .ftk-sw .nm { font-size:11.5px; position:relative; z-index:1; }
+  .ftk-sw .dots { position:absolute; top:6px; right:7px; display:flex; gap:3px; z-index:1; }
+  .ftk-sw .dots i { width:7px; height:7px; border-radius:50%; box-shadow:0 0 0 1px rgba(0,0,0,.15); }
+
+  .ftk-range { -webkit-appearance:none; appearance:none; width:100%; height:5px; border-radius:6px;
+    background:#57564e; outline:none; margin:4px 0 2px; }
+  .ftk-range::-webkit-slider-thumb { -webkit-appearance:none; appearance:none; width:18px; height:18px;
+    border-radius:50%; background:#7fd6c4; border:2px solid #1d1c17; cursor:pointer; box-shadow:2px 2px 0 rgba(0,0,0,.3); }
+  .ftk-range::-moz-range-thumb { width:18px; height:18px; border-radius:50%; background:#7fd6c4;
+    border:2px solid #1d1c17; cursor:pointer; }
+  .ftk-ends { display:flex; justify-content:space-between; font-size:11px; color:#85837a; }
+</style>
+</head>
+<body class="show-notes">
+
+  <!-- ===== META TOOLBAR (wireframe tool chrome — not part of the product) ===== -->
+  <div class="meta">
+    <div class="meta-row">
+      <span class="brand">Data<span class="dot">●</span>Automated</span>
+      <span class="tag">wireframe exploration · v1</span>
+      <div class="tabs" id="screenTabs" role="tablist">
+        <button data-screen="dashboard" role="tab" aria-selected="true">Dashboard</button>
+        <button data-screen="voc" role="tab" aria-selected="false">VoC</button>
+        <button data-screen="competitive" role="tab" aria-selected="false">Competitive</button>
+        <button data-screen="journey" role="tab" aria-selected="false">Journey</button>
+        <button data-screen="reports" role="tab" aria-selected="false">Reports</button>
+        <button data-screen="settings" role="tab" aria-selected="false">Settings</button>
+      </div>
+    </div>
+    <div class="meta-row two">
+      <div class="tweaks">
+        <div class="tweak" id="variantWrap">
+          <label>Dashboard layout</label>
+          <div class="seg" id="variantSeg">
+            <button data-v="A" aria-selected="true" title="KPI row + 3-column streams">A</button>
+            <button data-v="B" aria-selected="false" title="Prioritized feed first">B</button>
+            <button data-v="C" aria-selected="false" title="Three vertical lanes">C</button>
+            <button data-v="D" aria-selected="false" title="Bento mosaic">D</button>
+          </div>
+          <span class="mini" id="variantName" style="color:#bdbbb0;font-size:12px;white-space:nowrap"></span>
+        </div>
+        <div class="tweak"><label for="t-notes">annotations</label><div class="sw on" id="t-notes" role="switch" aria-checked="true"></div></div>
+        <div class="tweak"><label>density</label>
+          <div class="seg" id="densitySeg"><button data-d="comfortable" aria-selected="true">comfy</button><button data-d="compact" aria-selected="false">compact</button></div></div>
+        <div class="tweak"><label for="t-color">color</label><div class="sw on" id="t-color" role="switch" aria-checked="true"></div></div>
+        <div class="tweak" id="listWrap"><label>list style</label>
+          <div class="seg" id="listSeg"><button data-l="cards" aria-selected="true">cards</button><button data-l="table" aria-selected="false">table</button></div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== APP CANVAS ===== -->
+  <div class="canvas">
+    <div id="sideMount"></div>
+    <div class="main" id="mainMount"></div>
+  </div>
+
+  <script src="wf-shell.js"></script>
+  <script src="wf-dashboard.js"></script>
+  <script src="wf-screens.js"></script>
+  <script>
+  (function () {
+    const state = {
+      screen: 'dashboard',
+      variant: 'A',
+      notes: true,
+      color: true,
+      density: 'comfortable',
+      list: 'cards',
+    };
+
+    const sideMount = document.getElementById('sideMount');
+    const mainMount = document.getElementById('mainMount');
+
+    function applyBodyClasses() {
+      document.body.classList.toggle('show-notes', state.notes);
+      document.body.classList.toggle('mono', !state.color);
+      document.body.classList.toggle('compact', state.density === 'compact');
+    }
+
+    function render() {
+      applyBodyClasses();
+      sideMount.innerHTML = WF.sidebar(state.screen);
+      rebindSidebar();
+
+      let html = '';
+      if (state.screen === 'dashboard') {
+        html = WF.topbar('Dashboard', 'Acme SaaS Inc. · ' + WF.dashboardTitle(state.variant)) + WF.dashboard(state.variant);
+      } else if (state.screen === 'voc') {
+        html = WF.voc(state.list);
+      } else if (state.screen === 'competitive') {
+        html = WF.competitive();
+      } else if (state.screen === 'journey') {
+        html = WF.journey();
+      } else if (state.screen === 'reports') {
+        html = WF.reports();
+      } else if (state.screen === 'settings') {
+        html = WF.settings();
+      }
+      mainMount.innerHTML = html;
+
+      // show/hide context-specific tweaks
+      document.getElementById('variantWrap').style.display = state.screen === 'dashboard' ? '' : 'none';
+      document.getElementById('listWrap').style.display = state.screen === 'voc' ? '' : 'none';
+      document.getElementById('variantName').textContent = state.screen === 'dashboard' ? '→ ' + WF.dashboardTitle(state.variant) : '';
+
+      // sync tab selection
+      document.querySelectorAll('#screenTabs button').forEach((b) =>
+        b.setAttribute('aria-selected', b.dataset.screen === state.screen));
+    }
+
+    function rebindSidebar() {
+      document.querySelectorAll('.side .nav a[data-screen]').forEach((a) => {
+        a.addEventListener('click', () => {
+          const s = a.dataset.screen;
+          state.screen = s;
+          render();
+        });
+      });
+    }
+
+    // tab nav
+    document.querySelectorAll('#screenTabs button').forEach((b) =>
+      b.addEventListener('click', () => { state.screen = b.dataset.screen; render(); }));
+
+    // variant segmented
+    document.querySelectorAll('#variantSeg button').forEach((b) =>
+      b.addEventListener('click', () => {
+        state.variant = b.dataset.v;
+        document.querySelectorAll('#variantSeg button').forEach((x) => x.setAttribute('aria-selected', x === b));
+        render();
+      }));
+
+    // density segmented
+    document.querySelectorAll('#densitySeg button').forEach((b) =>
+      b.addEventListener('click', () => {
+        state.density = b.dataset.d;
+        document.querySelectorAll('#densitySeg button').forEach((x) => x.setAttribute('aria-selected', x === b));
+        render();
+      }));
+
+    // list segmented
+    document.querySelectorAll('#listSeg button').forEach((b) =>
+      b.addEventListener('click', () => {
+        state.list = b.dataset.l;
+        document.querySelectorAll('#listSeg button').forEach((x) => x.setAttribute('aria-selected', x === b));
+        render();
+      }));
+
+    // switches
+    function bindSwitch(id, key) {
+      const el = document.getElementById(id);
+      el.addEventListener('click', () => {
+        state[key] = !state[key];
+        el.classList.toggle('on', state[key]);
+        el.setAttribute('aria-checked', state[key]);
+        render();
+      });
+    }
+    bindSwitch('t-notes', 'notes');
+    bindSwitch('t-color', 'color');
+
+    render();
+  })();
+  </script>
+
+  <!-- ===== FEEL TWEAKS PANEL — host-toggled, reshapes the whole render ===== -->
+  <script>
+  (function () {
+    const FEEL_DEFAULTS = /*EDITMODE-BEGIN*/{
+      "fidelity": "hifi",
+      "substrate": "carbon",
+      "stroke": 44
+    }/*EDITMODE-END*/;
+
+    const LS = 'da-feel-tweaks';
+    let feel = Object.assign({}, FEEL_DEFAULTS);
+    try { Object.assign(feel, JSON.parse(localStorage.getItem(LS) || '{}')); } catch (e) {}
+
+    const FIDELITY = {
+      napkin: 'Loose pencil draft — wobbly, grainy, dashed.',
+      wire:   'Balanced low-fi wireframe (default).',
+      hifi:   'Crisp product mockup — clean type, soft shadows.',
+    };
+    const SUBSTRATES = [
+      { id: 'newsprint',  nm: 'Newsprint',  bg: '#f4f3ee', ink: '#2c2b27', dots: ['#0f8a78', '#cf4b2e', '#2f6bd8'] },
+      { id: 'blueprint',  nm: 'Blueprint',  bg: '#13243f', ink: '#dde9ff', dots: ['#4fd2c7', '#ff9d6e', '#86b0ff'] },
+      { id: 'whiteboard', nm: 'Whiteboard', bg: '#fafbfb', ink: '#1d2024', dots: ['#00a98f', '#e5482a', '#2563eb'] },
+      { id: 'carbon',     nm: 'Carbon',     bg: '#1b1c1f', ink: '#e7e6e1', dots: ['#33ccae', '#ff6f4d', '#6f9dff'] },
+    ];
+
+    function applyFeel() {
+      document.body.setAttribute('data-fidelity', feel.fidelity);
+      document.body.setAttribute('data-substrate', feel.substrate);
+      document.documentElement.style.setProperty('--hand', (feel.stroke / 100).toFixed(3));
+    }
+
+    function persist(key, val) {
+      feel[key] = val;
+      applyFeel();
+      try { localStorage.setItem(LS, JSON.stringify(feel)); } catch (e) {}
+      window.parent.postMessage({ type: '__edit_mode_set_keys', edits: { [key]: val } }, '*');
+    }
+
+    // ---- build panel ----
+    const swatches = SUBSTRATES.map((s) => `
+      <div class="ftk-sw" data-sub="${s.id}" role="radio" aria-selected="${feel.substrate === s.id}"
+           style="background:${s.bg};color:${s.ink}">
+        <span class="dots">${s.dots.map((d) => `<i style="background:${d}"></i>`).join('')}</span>
+        <span class="nm">${s.nm}</span>
+      </div>`).join('');
+
+    const panel = document.createElement('div');
+    panel.className = 'ftk';
+    panel.innerHTML = `
+      <div class="ftk-hd" id="ftkDrag">
+        <span class="ti"><b>Data<span class="dot">●</span>Tweaks</b><span class="sub">reshape the feel</span></span>
+        <button class="ftk-x" id="ftkClose" title="Close">✕</button>
+      </div>
+      <div class="ftk-body">
+        <div class="ftk-ctl">
+          <div class="ftk-lab">Fidelity</div>
+          <div class="ftk-seg" id="ftkFidelity">
+            <button data-v="napkin" aria-selected="${feel.fidelity === 'napkin'}">Napkin</button>
+            <button data-v="wire"   aria-selected="${feel.fidelity === 'wire'}">Wireframe</button>
+            <button data-v="hifi"   aria-selected="${feel.fidelity === 'hifi'}">Hi-Fi</button>
+          </div>
+          <div class="ftk-hint" id="ftkFidHint"></div>
+        </div>
+        <div class="ftk-ctl">
+          <div class="ftk-lab">Substrate</div>
+          <div class="ftk-sw-grid" id="ftkSub">${swatches}</div>
+        </div>
+        <div class="ftk-ctl">
+          <div class="ftk-lab">Stroke energy</div>
+          <input type="range" class="ftk-range" id="ftkStroke" min="0" max="100" step="1" value="${feel.stroke}">
+          <div class="ftk-ends"><span>tight · drafting</span><span>loose · sketchy</span></div>
+        </div>
+      </div>`;
+    document.body.appendChild(panel);
+
+    const fidHint = panel.querySelector('#ftkFidHint');
+    const setHint = () => { fidHint.textContent = FIDELITY[feel.fidelity]; };
+    setHint();
+
+    panel.querySelectorAll('#ftkFidelity button').forEach((b) =>
+      b.addEventListener('click', () => {
+        persist('fidelity', b.dataset.v);
+        panel.querySelectorAll('#ftkFidelity button').forEach((x) => x.setAttribute('aria-selected', x === b));
+        setHint();
+      }));
+
+    panel.querySelectorAll('#ftkSub .ftk-sw').forEach((el) =>
+      el.addEventListener('click', () => {
+        persist('substrate', el.dataset.sub);
+        panel.querySelectorAll('#ftkSub .ftk-sw').forEach((x) => x.setAttribute('aria-selected', x === el));
+      }));
+
+    panel.querySelector('#ftkStroke').addEventListener('input', (e) =>
+      persist('stroke', Number(e.target.value)));
+
+    // ---- drag ----
+    (function () {
+      const hd = panel.querySelector('#ftkDrag');
+      let sx, sy, sr, sb;
+      hd.addEventListener('mousedown', (e) => {
+        if (e.target.closest('.ftk-x')) return;
+        const r = panel.getBoundingClientRect();
+        sx = e.clientX; sy = e.clientY;
+        sr = window.innerWidth - r.right; sb = window.innerHeight - r.bottom;
+        const move = (ev) => {
+          panel.style.right = Math.max(8, sr - (ev.clientX - sx)) + 'px';
+          panel.style.bottom = Math.max(8, sb - (ev.clientY - sy)) + 'px';
+        };
+        const up = () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); };
+        window.addEventListener('mousemove', move); window.addEventListener('mouseup', up);
+        e.preventDefault();
+      });
+    })();
+
+    // ---- host protocol (toolbar Tweaks toggle) ----
+    function show(on) { panel.classList.toggle('open', on); }
+    panel.querySelector('#ftkClose').addEventListener('click', () => {
+      show(false);
+      window.parent.postMessage({ type: '__edit_mode_dismissed' }, '*');
+    });
+    window.addEventListener('message', (e) => {
+      const t = e && e.data && e.data.type;
+      if (t === '__activate_edit_mode') show(true);
+      else if (t === '__deactivate_edit_mode') show(false);
+    });
+
+    applyFeel();
+    window.parent.postMessage({ type: '__edit_mode_available' }, '*');
+  })();
+  </script>
+</body>
+</html>
