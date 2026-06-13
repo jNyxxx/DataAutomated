@@ -86,6 +86,72 @@ async def bearer_token(db_pool):
 
 
 @pytest.fixture
+async def analyst_bearer_token(db_pool):
+    """Like bearer_token but with analyst role (can trigger agent/report runs)."""
+    suffix = str(_uuid.uuid4())[:8]
+    email_client = f"epco_an_{suffix}@unit.com"
+    email_user = f"epuser_an_{suffix}@unit.com"
+    password = "ep_password"
+    conn = await asyncpg.connect(TEST_DB_DSN)
+    try:
+        client_id = await conn.fetchval(
+            "INSERT INTO clients (name, email) VALUES ($1, $2) RETURNING id;",
+            f"Analyst Test Co {suffix}", email_client,
+        )
+        hashed = _pwd.hash(password)
+        await conn.execute(
+            "INSERT INTO users (client_id, email, hashed_password, role) "
+            "VALUES ($1, $2, $3, 'analyst');",
+            client_id, email_user, hashed,
+        )
+    finally:
+        await conn.close()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        resp = await ac.post("/auth/token", data={"username": email_user, "password": password})
+    assert resp.status_code == 200, f"Login failed: {resp.json()}"
+    yield resp.json()["access_token"]
+    conn = await asyncpg.connect(TEST_DB_DSN)
+    try:
+        await conn.execute("DELETE FROM users WHERE email = $1;", email_user)
+        await conn.execute("DELETE FROM clients WHERE email = $1;", email_client)
+    finally:
+        await conn.close()
+
+
+@pytest.fixture
+async def admin_bearer_token(db_pool):
+    """Like bearer_token but with admin role (can write data-sources, credentials)."""
+    suffix = str(_uuid.uuid4())[:8]
+    email_client = f"epco_adm_{suffix}@unit.com"
+    email_user = f"epuser_adm_{suffix}@unit.com"
+    password = "ep_password"
+    conn = await asyncpg.connect(TEST_DB_DSN)
+    try:
+        client_id = await conn.fetchval(
+            "INSERT INTO clients (name, email) VALUES ($1, $2) RETURNING id;",
+            f"Admin Test Co {suffix}", email_client,
+        )
+        hashed = _pwd.hash(password)
+        await conn.execute(
+            "INSERT INTO users (client_id, email, hashed_password, role) "
+            "VALUES ($1, $2, $3, 'admin');",
+            client_id, email_user, hashed,
+        )
+    finally:
+        await conn.close()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        resp = await ac.post("/auth/token", data={"username": email_user, "password": password})
+    assert resp.status_code == 200, f"Login failed: {resp.json()}"
+    yield resp.json()["access_token"]
+    conn = await asyncpg.connect(TEST_DB_DSN)
+    try:
+        await conn.execute("DELETE FROM users WHERE email = $1;", email_user)
+        await conn.execute("DELETE FROM clients WHERE email = $1;", email_client)
+    finally:
+        await conn.close()
+
+
+@pytest.fixture
 async def http_client():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         yield ac
@@ -278,7 +344,7 @@ async def test_churn_webhook_requires_internal_secret(http_client, monkeypatch):
 # Background dispatch timing (< 100ms)
 # ---------------------------------------------------------------------------
 
-async def test_analyze_returns_202_immediately(http_client, bearer_token, monkeypatch):
+async def test_analyze_returns_202_immediately(http_client, analyst_bearer_token, monkeypatch):
     # Monkeypatch the background function to a no-op so we measure pure dispatch time,
     # not agent execution: ASGITransport runs background tasks to completion before
     # post() returns when the event loop is otherwise idle (isolation / CI).
@@ -287,7 +353,7 @@ async def test_analyze_returns_202_immediately(http_client, bearer_token, monkey
     start = time.monotonic()
     resp = await http_client.post(
         "/insights/analyze",
-        headers={"Authorization": f"Bearer {bearer_token}"},
+        headers={"Authorization": f"Bearer {analyst_bearer_token}"},
     )
     elapsed_ms = (time.monotonic() - start) * 1000
     assert resp.status_code == 202
@@ -295,26 +361,26 @@ async def test_analyze_returns_202_immediately(http_client, bearer_token, monkey
     assert elapsed_ms < 100, f"/insights/analyze took {elapsed_ms:.1f}ms — must be < 100ms"
 
 
-async def test_signals_analyze_returns_202_immediately(http_client, bearer_token, monkeypatch):
+async def test_signals_analyze_returns_202_immediately(http_client, analyst_bearer_token, monkeypatch):
     async def _noop(**kw): pass
     monkeypatch.setattr("app.routers.signals._run_comp_signal_analysis", _noop)
     start = time.monotonic()
     resp = await http_client.post(
         "/signals/analyze",
-        headers={"Authorization": f"Bearer {bearer_token}"},
+        headers={"Authorization": f"Bearer {analyst_bearer_token}"},
     )
     elapsed_ms = (time.monotonic() - start) * 1000
     assert resp.status_code == 202
     assert elapsed_ms < 100, f"/signals/analyze took {elapsed_ms:.1f}ms — must be < 100ms"
 
 
-async def test_journeys_analyze_returns_202_immediately(http_client, bearer_token, monkeypatch):
+async def test_journeys_analyze_returns_202_immediately(http_client, analyst_bearer_token, monkeypatch):
     async def _noop(**kw): pass
     monkeypatch.setattr("app.routers.journeys._run_journey_analysis", _noop)
     start = time.monotonic()
     resp = await http_client.post(
         "/journeys/analyze",
-        headers={"Authorization": f"Bearer {bearer_token}"},
+        headers={"Authorization": f"Bearer {analyst_bearer_token}"},
     )
     elapsed_ms = (time.monotonic() - start) * 1000
     assert resp.status_code == 202
@@ -427,12 +493,12 @@ async def test_n8n_latest_signals_for_client(n8n_client_id):
     assert resp.json() == {"signals": []}
 
 
-async def test_reports_generate_accepts_jwt(bearer_token):
-    """Dashboard path: JWT bearer still works on the dual-auth route."""
+async def test_reports_generate_accepts_jwt(analyst_bearer_token):
+    """Dashboard path: JWT bearer (analyst+) still works on the dual-auth route."""
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         resp = await ac.post(
             "/api/reports/generate",
-            headers={"Authorization": f"Bearer {bearer_token}"},
+            headers={"Authorization": f"Bearer {analyst_bearer_token}"},
             json={"report_type": "weekly_intelligence", "period": "last_7_days"},
         )
     assert resp.status_code == 202
@@ -667,8 +733,8 @@ async def test_insights_latest_with_auth(bearer_token):
 # bearer_token teardown deletes the client, cascading the data_sources rows.
 # ---------------------------------------------------------------------------
 
-async def test_data_source_duplicate_type_returns_409(bearer_token):
-    headers = {"Authorization": f"Bearer {bearer_token}"}
+async def test_data_source_duplicate_type_returns_409(admin_bearer_token):
+    headers = {"Authorization": f"Bearer {admin_bearer_token}"}
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         first = await ac.post("/api/data-sources", headers=headers, json={"source_type": "zendesk"})
         second = await ac.post("/api/data-sources", headers=headers, json={"source_type": "zendesk"})

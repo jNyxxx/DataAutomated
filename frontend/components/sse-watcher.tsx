@@ -1,14 +1,11 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
-
-function getToken(): string | null {
-  if (typeof document === 'undefined') return null;
-  const match = document.cookie.match(/(?:^|;\s*)token=([^;]+)/);
-  return match ? decodeURIComponent(match[1]) : null;
-}
+// EventSource URL must be browser-reachable; only the short-lived ticket (not
+// the JWT) appears here — acceptable per CLAUDE.md §14 P2.8.
+const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
 interface Toast {
   id: number;
@@ -17,29 +14,83 @@ interface Toast {
 
 export default function SseWatcher() {
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const router = useRouter();
+  const mountedRef = useRef(true);
 
   useEffect(() => {
-    const token = getToken();
-    if (!token) return;
+    mountedRef.current = true;
+    let es: EventSource | null = null;
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
 
-    const es = new EventSource(`${API_URL}/stream/insights?token=${encodeURIComponent(token)}`);
-
-    es.onmessage = (e) => {
+    async function connect() {
       try {
-        const data = JSON.parse(e.data as string) as { narrative?: string };
-        const msg = data.narrative
-          ? `New insight: ${data.narrative.slice(0, 80)}…`
-          : 'New insight available';
-        const id = Date.now();
-        setToasts((prev) => [...prev, { id, message: msg }]);
-        setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 6000);
-      } catch {
-        // ignore parse errors
-      }
-    };
+        // Exchange the HttpOnly cookie for a 60s single-use ticket via the same-origin
+        // proxy — the proxy reads the cookie server-side, no JWT is exposed to JS.
+        const res = await fetch('/api/backend/api/sse-ticket', { method: 'POST' });
+        if (!res.ok) return;
+        const data = await res.json() as { ticket?: string };
+        if (!data.ticket) return;
+        if (!mountedRef.current) return;
 
-    return () => es.close();
-  }, []);
+        es = new EventSource(
+          `${BACKEND_URL}/stream/insights?ticket=${encodeURIComponent(data.ticket)}`
+        );
+
+        es.onmessage = (e) => {
+          try {
+            const payload = JSON.parse(e.data as string) as {
+              event_type?: string;
+              narrative?: string;
+              competitor_name?: string;
+              signal_type?: string;
+              funnel_step?: string;
+            };
+            let msg: string;
+            if (payload.event_type === 'signal') {
+              msg = payload.competitor_name
+                ? `New signal: ${payload.competitor_name} — ${payload.signal_type ?? 'update'}`
+                : 'New competitive signal detected';
+            } else if (payload.event_type === 'journey') {
+              msg = payload.funnel_step
+                ? `New journey insight: ${payload.funnel_step}`
+                : 'New journey intelligence available';
+            } else {
+              msg = payload.narrative
+                ? `New insight: ${payload.narrative.slice(0, 80)}…`
+                : 'New insight available';
+            }
+            const id = Date.now();
+            setToasts((prev) => [...prev, { id, message: msg }]);
+            setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 6000);
+            router.refresh();
+          } catch {
+            // ignore parse errors
+          }
+        };
+
+        es.onerror = () => {
+          es?.close();
+          es = null;
+          if (mountedRef.current) {
+            retryTimer = setTimeout(() => void connect(), 5000);
+          }
+        };
+      } catch {
+        // silently fail — SSE is best-effort; schedule a retry
+        if (mountedRef.current) {
+          retryTimer = setTimeout(() => void connect(), 5000);
+        }
+      }
+    }
+
+    void connect();
+
+    return () => {
+      mountedRef.current = false;
+      clearTimeout(retryTimer);
+      es?.close();
+    };
+  }, [router]);
 
   if (toasts.length === 0) return null;
 

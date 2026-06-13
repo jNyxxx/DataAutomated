@@ -1,0 +1,53 @@
+{
+  "family": "dataautomated-backend",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "512",
+  "memory": "1024",
+  "executionRoleArn": "arn:aws:iam::456788081187:role/dataautomated-ecs-execution",
+  "taskRoleArn": "arn:aws:iam::456788081187:role/dataautomated-backend-task",
+  "containerDefinitions": [
+    {
+      "name": "backend",
+      "image": "456788081187.dkr.ecr.ap-southeast-2.amazonaws.com/dataautomated-backend:latest",
+      "essential": true,
+      "portMappings": [
+        { "containerPort": 8000, "protocol": "tcp" }
+      ],
+      "environment": [
+        { "name": "AWS_REGION", "value": "ap-southeast-2" },
+        { "name": "APP_ENV", "value": "production" }
+      ],
+      "secrets": [
+        { "name": "DATABASE_DSN",                "valueFrom": "arn:aws:secretsmanager:ap-southeast-2:456788081187:secret:dataautomated/prod/backend:database_dsn::" },
+        { "name": "DATABASE_URL",                "valueFrom": "arn:aws:secretsmanager:ap-southeast-2:456788081187:secret:dataautomated/prod/backend:database_url::" },
+        { "name": "JWT_SECRET_KEY",              "valueFrom": "arn:aws:secretsmanager:ap-southeast-2:456788081187:secret:dataautomated/prod/backend:jwt_secret_key::" },
+        { "name": "CREDENTIAL_ENCRYPTION_KEY",   "valueFrom": "arn:aws:secretsmanager:ap-southeast-2:456788081187:secret:dataautomated/prod/backend:credential_encryption_key::" },
+        { "name": "OPENAI_API_KEY",              "valueFrom": "arn:aws:secretsmanager:ap-southeast-2:456788081187:secret:dataautomated/prod/backend:openai_api_key::" },
+        { "name": "LANGCHAIN_API_KEY",           "valueFrom": "arn:aws:secretsmanager:ap-southeast-2:456788081187:secret:dataautomated/prod/backend:langchain_api_key::" },
+        { "name": "N8N_WEBHOOK_SECRET",          "valueFrom": "arn:aws:secretsmanager:ap-southeast-2:456788081187:secret:dataautomated/prod/backend:n8n_webhook_secret::" },
+        { "name": "N8N_WEBHOOK_URL",             "valueFrom": "arn:aws:secretsmanager:ap-southeast-2:456788081187:secret:dataautomated/prod/backend:n8n_webhook_url::" },
+        { "name": "RESEND_API_KEY",              "valueFrom": "arn:aws:secretsmanager:ap-southeast-2:456788081187:secret:dataautomated/prod/backend:resend_api_key::" },
+        { "name": "S3_REPORTS_BUCKET",           "valueFrom": "arn:aws:secretsmanager:ap-southeast-2:456788081187:secret:dataautomated/prod/backend:s3_reports_bucket::" },
+        { "name": "ZENDESK_WEBHOOK_SECRET",      "valueFrom": "arn:aws:secretsmanager:ap-southeast-2:456788081187:secret:dataautomated/prod/backend:zendesk_webhook_secret::" },
+        { "name": "TYPEFORM_WEBHOOK_SECRET",     "valueFrom": "arn:aws:secretsmanager:ap-southeast-2:456788081187:secret:dataautomated/prod/backend:typeform_webhook_secret::" },
+        { "name": "INTERCOM_WEBHOOK_SECRET",     "valueFrom": "arn:aws:secretsmanager:ap-southeast-2:456788081187:secret:dataautomated/prod/backend:intercom_webhook_secret::" }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/dataautomated-backend",
+          "awslogs-region": "ap-southeast-2",
+          "awslogs-stream-prefix": "ecs"
+        }
+      },
+      "healthCheck": {
+        "command": ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 60
+      }
+    }
+  ]
+}

@@ -21,9 +21,12 @@ requires async; registry.py is async accordingly (mirrors database.py deviation 
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import json
 import logging
+import socket
 from typing import Any
+from urllib.parse import urlparse
 from uuid import UUID
 
 import httpx
@@ -34,6 +37,48 @@ from app.database import acquire_for_client
 from app.services.credential_encryption import decrypt_credentials
 
 logger = logging.getLogger("dataautomated")
+
+# ---------------------------------------------------------------------------
+# SSRF guard — block outbound requests to private/link-local/loopback ranges.
+# Called by tools before making any HTTP request to a user-influenced URL.
+# ---------------------------------------------------------------------------
+
+_PRIVATE_NETWORKS = [
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.168.0.0/16"),
+    ipaddress.ip_network("127.0.0.0/8"),
+    ipaddress.ip_network("169.254.0.0/16"),   # link-local
+    ipaddress.ip_network("::1/128"),           # IPv6 loopback
+    ipaddress.ip_network("fc00::/7"),          # IPv6 unique local
+    ipaddress.ip_network("fe80::/10"),         # IPv6 link-local
+]
+
+
+def assert_safe_url(url: str) -> None:
+    """
+    Raise ValueError if `url` resolves to a private/internal address.
+    Must be called before any outbound HTTP request to a user-influenced URL
+    to prevent SSRF attacks (CLAUDE.md §14, OWASP ASVS V10).
+    Hardcoded vendor API URLs (newsapi.org, zendesk.com, etc.) don't require
+    this check — only URLs derived from user-supplied data need it.
+    """
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError(f"URL scheme '{parsed.scheme}' not allowed; only http/https permitted.")
+    hostname = parsed.hostname
+    if not hostname:
+        raise ValueError("URL has no hostname.")
+    try:
+        addr_str = socket.getaddrinfo(hostname, None, proto=socket.IPPROTO_TCP)[0][4][0]
+        addr = ipaddress.ip_address(addr_str)
+    except (socket.gaierror, ValueError):
+        raise ValueError(f"Cannot resolve or parse hostname: {hostname}")
+    for network in _PRIVATE_NETWORKS:
+        if addr in network:
+            raise ValueError(
+                f"SSRF blocked: '{hostname}' resolves to private/internal address {addr}."
+            )
 
 # Status codes that warrant a retry (transient failures or rate limits).
 # Permanent errors (401, 403, 404, 422) are NOT retried — they represent

@@ -2,39 +2,34 @@
 FastAPI application entry point (CLAUDE.md §10, ADR-001).
 
 Lifespan: opens and closes the shared asyncpg pool (database.py).
-Routers: auth / insights / signals / journeys included with their approved prefixes.
-Inline /api/ routes that span domains (stable n8n contract — CLAUDE.md §10, §13):
-  GET  /api/clients/active-list                  — admin query for n8n ingestion loops
-  GET  /api/clients/with-competitive-monitoring  — clients with CompSig enabled (n8n)
-  GET  /api/dashboard/summary                    — aggregated KPIs for the authenticated client (< 300ms)
-  POST /api/reports/generate                     — stub; Phase 6 wires PDF + S3
-  POST /webhook/churn-alert                      — churn webhook entry (n8n side); Phase 6
+Routers included (CLAUDE.md §10 prefixes / tags):
+  auth         → /auth                  Authentication
+  insights     → /insights              VoC Insights  (+ /stream/insights, /api/agents/voc/run, /api/ingest/trigger)
+  signals      → /signals               Competitive Signals  (+ /api/agents/competitive-signal/run)
+  journeys     → /journeys              Journey Analytics
+  data_sources → /api/data-sources      Data-source CRUD
+  webhooks     → /webhook/*             Vendor webhook ingestion + churn alert
+  ops          → /api/clients/*, /api/reports/*, /api/dashboard/*   n8n + dashboard ops
 """
 
 from __future__ import annotations
 
 import logging
+import time
+from collections import defaultdict
 from contextlib import asynccontextmanager
-from typing import Any
 
-from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, status
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from jose import JWTError, jwt
 
-logger = logging.getLogger(__name__)
-
-import app.database as _db
 from app.config import settings
-from app.database import acquire_for_client, close_pool, init_pool
-from app.routers import auth, insights, journeys, signals
-from app.routers.auth import (
-    CurrentUser,
-    get_current_user,
-    oauth2_scheme_optional,
-    resolve_service_client,
-    verify_n8n_secret,
-)
+from app.database import close_pool, init_pool
+from app.routers import auth, data_sources, insights, journeys, ops, signals, webhooks
 from app.services.audit_service import record_audit
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -44,21 +39,20 @@ async def lifespan(app: FastAPI):
     await close_pool()
 
 
-# ---- Audit middleware (CLAUDE.md §14 — complete trail of all data access) ----
+# ---------------------------------------------------------------------------
+# Audit middleware (CLAUDE.md §14 — complete trail of all data access)
+# ---------------------------------------------------------------------------
 
-# Liveness/docs are noise; SSE streams stay open for the client's session, so the
-# post-response hook would only fire at disconnect — streams are exempt instead.
 _AUDIT_EXEMPT_PATHS = {"/", "/health", "/docs", "/docs/oauth2-redirect", "/openapi.json", "/redoc"}
 
 
 def _audit_identity(scope: dict) -> tuple[str | None, object]:
     """
     Best-effort (actor, client_id) from request headers for the audit row.
-    The JWT is verified (HS256) before its claims are trusted; an n8n call is
-    identified by the presence of the webhook-secret header (route-level auth
-    decides validity — the recorded status code reflects rejections).
+    JWT is verified (HS256) before its claims are trusted; n8n calls are
+    identified by the presence of the webhook-secret header.
     """
-    headers = {k.lower(): v for k, v in scope.get("headers", [])}  # bytes -> bytes
+    headers = {k.lower(): v for k, v in scope.get("headers", [])}
     auth_header = headers.get(b"authorization", b"").decode("latin-1")
     if auth_header.lower().startswith("bearer "):
         try:
@@ -121,11 +115,106 @@ class AuditMiddleware:
             )
 
 
+# ---------------------------------------------------------------------------
+# Security middleware (CLAUDE.md §2, §14)
+# ---------------------------------------------------------------------------
+
+# In-process rate limiter (per IP, per path prefix).
+# NOTE: per-instance only — at 2–10 ECS tasks, limits apply independently.
+# Production-grade distributed rate limiting requires AWS WAF (deferred).
+_rate_limit_store: dict[str, list[float]] = defaultdict(list)
+_RATE_LIMIT_RULES: dict[str, tuple[int, int]] = {
+    # path_prefix: (max_requests, window_seconds)
+    "/auth/token": (10, 60),
+    "/webhook/zendesk": (60, 60),
+    "/webhook/typeform": (60, 60),
+    "/webhook/intercom": (60, 60),
+}
+
+
+class SecurityMiddleware:
+    """
+    Single ASGI middleware that enforces:
+    1. Body size limit (reject > settings.max_body_size_bytes before reading the body).
+    2. Security response headers (CSP, X-Content-Type-Options, X-Frame-Options, Referrer-Policy).
+       HSTS is added only when APP_ENV=production (requires TLS in front).
+    3. Per-IP rate limiting on sensitive path prefixes (see _RATE_LIMIT_RULES).
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+
+        path = scope.get("path", "")
+        headers_map = {k.lower(): v for k, v in scope.get("headers", [])}
+
+        # ---- 1. Body size guard ----
+        content_length = headers_map.get(b"content-length", b"0")
+        try:
+            if int(content_length) > settings.max_body_size_bytes:
+                await send({"type": "http.response.start", "status": 413, "headers": []})
+                await send({"type": "http.response.body", "body": b""})
+                return
+        except (ValueError, TypeError):
+            pass
+
+        # ---- 2. Per-IP rate limiting (production only) ----
+        for prefix, (max_req, window) in _RATE_LIMIT_RULES.items():
+            if settings.app_env != "production":
+                break
+            if path.startswith(prefix):
+                client_ip = scope.get("client", ("unknown", 0))[0]
+                key = f"{client_ip}:{prefix}"
+                now = time.monotonic()
+                hits = _rate_limit_store[key]
+                _rate_limit_store[key] = [t for t in hits if now - t < window]
+                if len(_rate_limit_store[key]) >= max_req:
+                    await send({
+                        "type": "http.response.start",
+                        "status": 429,
+                        "headers": [(b"content-length", b"0"), (b"retry-after", str(window).encode())],
+                    })
+                    await send({"type": "http.response.body", "body": b""})
+                    return
+                _rate_limit_store[key].append(now)
+                break
+
+        # ---- 3. Security response headers ----
+        async def _send_with_headers(message):
+            if message["type"] == "http.response.start":
+                extra: list[tuple[bytes, bytes]] = [
+                    (b"x-content-type-options", b"nosniff"),
+                    (b"x-frame-options", b"DENY"),
+                    (b"referrer-policy", b"strict-origin-when-cross-origin"),
+                    (b"content-security-policy",
+                     b"default-src 'none'; frame-ancestors 'none'"),
+                ]
+                if settings.app_env == "production":
+                    extra.append((b"strict-transport-security", b"max-age=31536000; includeSubDomains"))
+                message = dict(message)
+                message["headers"] = list(message.get("headers", [])) + extra
+            await send(message)
+
+        await self.app(scope, receive, _send_with_headers)
+
+
+# ---------------------------------------------------------------------------
+# Application
+# ---------------------------------------------------------------------------
+
 app = FastAPI(
     title="DataAutomated.io API",
     version="1.0.0",
     lifespan=lifespan,
 )
+
+# TrustedHostMiddleware — rejects requests with unexpected Host headers.
+# In development "*" is the default (settings.allowed_hosts), so all hosts pass.
+if settings.allowed_hosts and settings.allowed_hosts != ["*"]:
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.allowed_hosts)
 
 # CORS — allow only the approved origins (CLAUDE.md §10).
 app.add_middleware(
@@ -136,31 +225,22 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Security headers + body-size + rate limiting.
+app.add_middleware(SecurityMiddleware)
+
 # Audit trail — every non-exempt API request lands in audit_log (§14).
 app.add_middleware(AuditMiddleware)
 
 # ---- Routers (CLAUDE.md §10 prefixes / tags) ----
-app.include_router(auth.router)         # /auth   — Authentication
-app.include_router(insights.router)     # /insights — VoC Insights
-app.include_router(insights._extra)     # /stream/insights, /api/agents/voc/run, /api/ingest/trigger
-app.include_router(signals.router)      # /signals  — Competitive Signals
-app.include_router(signals._extra)      # /api/agents/competitive-signal/run
-app.include_router(journeys.router)     # /journeys — Journey Analytics
-
-
-# ---- Internal auth ----
-
-async def require_n8n_webhook_secret(
-    x_n8n_webhook_secret: str | None = Header(default=None),
-) -> None:
-    """
-    Protect internal n8n/server-to-server endpoints.
-
-    CLAUDE.md §13 requires webhook auth via N8N_WEBHOOK_SECRET.  These routes
-    expose cross-client operational data, so they must not be anonymously
-    reachable.  Validation logic lives in app.routers.auth.verify_n8n_secret.
-    """
-    verify_n8n_secret(x_n8n_webhook_secret)
+app.include_router(auth.router)          # /auth   — Authentication
+app.include_router(insights.router)      # /insights — VoC Insights
+app.include_router(insights._extra)      # /stream/insights, /api/agents/voc/run, /api/ingest/trigger
+app.include_router(signals.router)       # /signals  — Competitive Signals
+app.include_router(signals._extra)       # /api/agents/competitive-signal/run
+app.include_router(journeys.router)      # /journeys — Journey Analytics
+app.include_router(data_sources.router)  # /api/data-sources
+app.include_router(webhooks.router)      # /webhook/* + churn-alert
+app.include_router(ops.router)           # /api/clients/*, /api/reports/*, /api/dashboard/*
 
 
 # ---- Health ----
@@ -174,382 +254,3 @@ async def health() -> dict:
 @app.get("/", tags=["Health"])
 async def root() -> dict:
     return {"name": "DataAutomated.io API", "version": app.version}
-
-
-# ---- Inline /api/ routes — stable n8n contract (CLAUDE.md §13) ----
-
-@app.get("/api/clients/active-list", tags=["Internal"])
-async def active_clients(_internal_auth: None = Depends(require_n8n_webhook_secret)):
-    """
-    Returns all active clients.  Used by n8n ingestion workflows to loop over
-    clients.  Admin-level query — no tenant context; runs as pool's login role.
-    Requires X-N8N-Webhook-Secret.  This route returns cross-client operational
-    data for n8n ingestion loops and must never be publicly readable.
-    """
-    if _db.pool is None:
-        return {"clients": []}
-    async with _db.pool.acquire() as conn:
-        rows = await conn.fetch(
-            "SELECT id, name, email, plan FROM clients WHERE is_active = TRUE"
-        )
-    return {
-        "clients": [
-            {k: str(v) if v is not None else None for k, v in dict(r).items()}
-            for r in rows
-        ]
-    }
-
-
-@app.get("/api/clients/with-competitive-monitoring", tags=["Internal"])
-async def clients_with_competitive_monitoring(
-    _internal_auth: None = Depends(require_n8n_webhook_secret),
-):
-    """
-    Returns active clients that have competitive monitoring enabled.
-    Used by the n8n Competitive Signal Monitor workflow to loop over targets.
-    Requires X-N8N-Webhook-Secret.  Phase 5 narrows this to clients with
-    competitive sources connected.
-    Phase 5: filter by data_sources where source_type includes competitive sources.
-    """
-    if _db.pool is None:
-        return {"clients": []}
-    async with _db.pool.acquire() as conn:
-        rows = await conn.fetch(
-            "SELECT id, name, email, plan FROM clients WHERE is_active = TRUE"
-        )
-    return {
-        "clients": [
-            {
-                "id": str(r["id"]),
-                "name": r["name"],
-                "email": r["email"],
-                "plan": r["plan"]
-            }
-            for r in rows
-        ]
-    }
-
-
-@app.get("/api/reports/list", tags=["Internal"])
-async def list_reports(current_user: CurrentUser = Depends(get_current_user)):
-    """Returns all generated reports for the authenticated client, newest first."""
-    async with acquire_for_client(current_user.client_id) as conn:
-        rows = await conn.fetch(
-            """SELECT id, report_type, s3_key, period_start, period_end, created_at
-               FROM reports WHERE client_id = $1 ORDER BY created_at DESC LIMIT 50""",
-            current_user.client_id,
-        )
-    return {
-        "reports": [
-            {k: str(v) if v is not None else None for k, v in dict(r).items()}
-            for r in rows
-        ]
-    }
-
-
-@app.get("/api/reports/{report_id}/download-url", tags=["Internal"])
-async def report_download_url(
-    report_id: str,
-    current_user: CurrentUser = Depends(get_current_user),
-):
-    """
-    Mint a short-lived presigned S3 URL so the dashboard can download a report
-    PDF. Objects are private (§14) — the browser never sees a raw S3 path.
-    Tenant-scoped: the row must belong to the caller's client (§6); another
-    client's report_id 404s identically to a nonexistent one (no existence leak).
-    15-minute expiry — minted per click, unlike the 7-day n8n email link.
-    """
-    import uuid as _uuid
-
-    try:
-        rid = _uuid.UUID(report_id)
-    except (ValueError, AttributeError, TypeError):
-        raise HTTPException(status_code=404, detail="Report not found.")
-
-    async with acquire_for_client(current_user.client_id) as conn:
-        row = await conn.fetchrow(
-            "SELECT s3_key FROM reports WHERE id = $1 AND client_id = $2",
-            rid,
-            current_user.client_id,
-        )
-    if row is None or not row["s3_key"]:
-        raise HTTPException(status_code=404, detail="Report not found.")
-
-    from app.services.report_service import presign_report_url
-    url = presign_report_url(row["s3_key"], expires_in=900)
-    if url is None:
-        raise HTTPException(status_code=503, detail="Report storage unavailable.")
-    return {"url": url}
-
-
-@app.get("/api/reports/latest-for-client", tags=["Internal"])
-async def latest_report_for_client(
-    client_id: str,
-    report_id: str | None = None,
-    _internal_auth: None = Depends(require_n8n_webhook_secret),
-):
-    """
-    Returns a report row for an explicit client_id so n8n Workflow 3 can build
-    the Resend download link, plus the client's name/email and a presigned S3 URL.
-
-    When `report_id` is supplied (WF03 pins the artifact it just triggered),
-    returns *exactly* that report — never a stale "latest" one — so a slow or
-    failed generation yields no row (s3_url=None) and the workflow safely skips
-    the send instead of emailing last week's PDF. Without `report_id`, returns
-    the most recent report. Tenant-scoped: a report_id only resolves within its
-    own client (§6). Requires X-N8N-Webhook-Secret (server-to-server — §13).
-    """
-    import uuid as _uuid
-
-    resolved_client_id = await resolve_service_client(client_id)
-    async with acquire_for_client(resolved_client_id) as conn:
-        if report_id is not None:
-            try:
-                rid = _uuid.UUID(report_id)
-            except (ValueError, AttributeError, TypeError):
-                rid = None
-            row = (
-                await conn.fetchrow(
-                    """SELECT id, report_type, s3_key, period_start, period_end, created_at
-                       FROM reports
-                       WHERE id = $1 AND client_id = $2""",
-                    rid,
-                    resolved_client_id,
-                )
-                if rid is not None
-                else None
-            )
-        else:
-            row = await conn.fetchrow(
-                """SELECT id, report_type, s3_key, period_start, period_end, created_at
-                   FROM reports
-                   WHERE client_id = $1
-                   ORDER BY created_at DESC LIMIT 1""",
-                resolved_client_id,
-            )
-        # Also fetch client email so n8n can address the Resend call.
-        client = await conn.fetchrow(
-            "SELECT name, email FROM clients WHERE id = $1",
-            resolved_client_id,
-        )
-    if row is None:
-        # Emitted when WF03 fetches before generation completes, or when
-        # S3/generation failed — CloudWatch can alert on this pattern.
-        logger.info(
-            "report_fetch_skip: no row found client=%s report_id=%s",
-            resolved_client_id,
-            report_id,
-        )
-        return {
-            "report": None,
-            "client_name": str(client["name"]) if client else None,
-            "client_email": str(client["email"]) if client else None,
-            "s3_url": None,
-        }
-    # Mint a presigned GET URL from the stored key at read-time (objects are
-    # private — §14). Lazy import keeps boto3 off main.py's module-load path.
-    from app.services.report_service import presign_report_url
-    return {
-        "report": {k: str(v) if v is not None else None for k, v in dict(row).items()},
-        "client_name": str(client["name"]) if client else None,
-        "client_email": str(client["email"]) if client else None,
-        "s3_url": presign_report_url(row["s3_key"]),
-    }
-
-
-@app.post("/api/reports/generate", status_code=202, tags=["Internal"])
-async def generate_report(
-    payload: dict[str, Any],
-    bg: BackgroundTasks,
-    token: str | None = Depends(oauth2_scheme_optional),
-    x_n8n_webhook_secret: str | None = Header(default=None),
-):
-    """
-    Trigger PDF report generation (background task). Returns immediately;
-    report_service generates PDF + S3 upload async.
-
-    Dual-consumer auth: the dashboard sends a JWT bearer (client scope from the
-    token); n8n Workflow 3 loops over all clients and authenticates with
-    X-N8N-Webhook-Secret + an explicit client_id in the body (§13/§6).
-    """
-    if token is not None:
-        current_user = await get_current_user(token)
-        resolved_client_id = current_user.client_id
-    else:
-        verify_n8n_secret(x_n8n_webhook_secret)
-        resolved_client_id = await resolve_service_client(payload.get("client_id"))
-
-    report_type = payload.get("report_type", "weekly_intelligence")
-    period = payload.get("period", "last_7_days")
-    client_id = str(resolved_client_id)
-
-    # Pre-allocate the report id and return it so n8n WF03 can poll for *this*
-    # run's artifact (GET .../latest-for-client?report_id=...) instead of
-    # whatever "latest" happens to exist — without it, a slow or failed
-    # generation makes the workflow email last week's stale PDF (§13).
-    import uuid as _uuid
-    report_id = str(_uuid.uuid4())
-
-    async def _run():
-        if _db.pool is None:
-            return
-        try:
-            # Lazy import: keeps the trigger path light and free of the PDF/S3
-            # dependency chain (WeasyPrint/boto3) until the background run.
-            from app.services.report_service import generate_report as _generate
-
-            async with _db.pool.acquire() as conn:
-                await _generate(conn, client_id, report_type, period, report_id=report_id)
-        except Exception as exc:
-            logger.error("report generation failed client=%s report_id=%s error=%s", client_id, report_id, exc)
-
-    bg.add_task(_run)
-    return {"status": "report_queued", "report_id": report_id}
-
-
-@app.post("/webhook/churn-alert", status_code=202, tags=["Internal"])
-async def churn_alert_webhook(
-    payload: dict[str, Any],
-    _internal_auth: None = Depends(require_n8n_webhook_secret),
-):
-    """
-    Churn alert entry point called by the VoC agent when churn_risk > 0.15.
-    The n8n Churn Alert workflow is triggered here; it routes to Slack/Resend based on
-    urgency (> 0.25 = URGENT; > 0.15 = standard early warning).
-    Stub — Phase 6 wires n8n webhook dispatch. Requires X-N8N-Webhook-Secret.
-    """
-    return {"status": "received"}
-
-
-@app.get("/api/data-sources", tags=["Internal"])
-async def list_data_sources(current_user: CurrentUser = Depends(get_current_user)):
-    """Returns data sources connected by the authenticated client. Credentials are never returned."""
-    async with acquire_for_client(current_user.client_id) as conn:
-        rows = await conn.fetch(
-            """SELECT id, source_type, is_active, last_synced_at, created_at
-               FROM data_sources WHERE client_id = $1 ORDER BY created_at ASC""",
-            current_user.client_id,
-        )
-    return {
-        "sources": [
-            {
-                "id": str(r["id"]),
-                "source_type": r["source_type"],
-                "is_active": r["is_active"],
-                "last_synced_at": str(r["last_synced_at"]) if r["last_synced_at"] else None,
-                "created_at": str(r["created_at"]),
-            }
-            for r in rows
-        ]
-    }
-
-
-@app.post("/api/data-sources", status_code=201, tags=["Internal"])
-async def add_data_source(
-    payload: dict[str, Any],
-    current_user: CurrentUser = Depends(get_current_user),
-):
-    """
-    Add a new data source for the authenticated client.
-    Credentials are AES-256-encrypted at the app layer before storage (CLAUDE.md §14).
-
-    Uniqueness rule: a client may only connect ONE active source per source_type
-    (the MCP tool registry resolves tools by source_type key — CLAUDE.md §8).
-    Returns 409 Conflict if an active source of the same type already exists.
-    """
-    import uuid as _uuid
-    from app.services.credential_encryption import encrypt_credentials
-
-    source_type = payload.get("source_type", "").strip()
-    raw_credentials = payload.get("credentials", {})
-    config = payload.get("config", {})
-
-    if not source_type:
-        raise HTTPException(status_code=422, detail="source_type is required")
-
-    async with acquire_for_client(current_user.client_id) as conn:
-        # Uniqueness guard: one active source per type per client (CLAUDE.md §8).
-        existing = await conn.fetchval(
-            """SELECT id FROM data_sources
-               WHERE client_id = $1 AND source_type = $2 AND is_active = TRUE
-               LIMIT 1""",
-            current_user.client_id,
-            source_type,
-        )
-        if existing is not None:
-            raise HTTPException(
-                status_code=409,
-                detail=f"A '{source_type}' source is already connected and active. "
-                       "Disconnect or deactivate it before adding another.",
-            )
-
-        encrypted = encrypt_credentials(raw_credentials) if raw_credentials else {}
-        new_id = _uuid.uuid4()
-        await conn.execute(
-            """INSERT INTO data_sources (id, client_id, source_type, credentials, config, is_active, created_at)
-               VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, TRUE, NOW())""",
-            new_id,
-            current_user.client_id,
-            source_type,
-            __import__("json").dumps(encrypted),
-            __import__("json").dumps(config),
-        )
-    return {"id": str(new_id), "source_type": source_type, "status": "connected"}
-
-
-@app.patch("/api/data-sources/{source_id}", tags=["Internal"])
-async def update_data_source(
-    source_id: str,
-    payload: dict[str, Any],
-    current_user: CurrentUser = Depends(get_current_user),
-):
-    """Toggle is_active for a data source owned by the authenticated client."""
-    import uuid as _uuid
-    is_active = payload.get("is_active")
-    if is_active is None:
-        raise HTTPException(status_code=422, detail="is_active required")
-    async with acquire_for_client(current_user.client_id) as conn:
-        result = await conn.execute(
-            """UPDATE data_sources SET is_active = $1
-               WHERE id = $2 AND client_id = $3""",
-            bool(is_active),
-            _uuid.UUID(source_id),
-            current_user.client_id,
-        )
-    if result == "UPDATE 0":
-        raise HTTPException(status_code=404, detail="Data source not found")
-    return {"status": "updated"}
-
-
-@app.get("/api/dashboard/summary", tags=["Internal"])
-async def dashboard_summary(current_user: CurrentUser = Depends(get_current_user)):
-    """
-    Aggregated KPI summary for the authenticated client's dashboard (< 300ms target).
-    Returns: latest sentiment score, churn risk, unread signal count, and latest
-    journey drop-off rate.  Uses acquire_for_client for full RLS + WHERE isolation.
-    """
-    async with acquire_for_client(current_user.client_id) as conn:
-        insight = await conn.fetchrow(
-            "SELECT sentiment_score, churn_risk, created_at "
-            "FROM feedback_insights "
-            "WHERE client_id = $1 ORDER BY created_at DESC LIMIT 1",
-            current_user.client_id,
-        )
-        unread_signals = await conn.fetchval(
-            "SELECT COUNT(*) FROM competitive_signals "
-            "WHERE client_id = $1 AND is_read = FALSE",
-            current_user.client_id,
-        )
-        journey = await conn.fetchrow(
-            "SELECT funnel_step, drop_off_rate FROM journey_insights "
-            "WHERE client_id = $1 ORDER BY created_at DESC LIMIT 1",
-            current_user.client_id,
-        )
-
-    return {
-        "sentiment_score": insight["sentiment_score"] if insight else None,
-        "churn_risk": insight["churn_risk"] if insight else None,
-        "unread_signals": unread_signals,
-        "latest_funnel_step": journey["funnel_step"] if journey else None,
-        "latest_drop_off_rate": journey["drop_off_rate"] if journey else None,
-    }

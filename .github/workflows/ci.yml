@@ -71,6 +71,23 @@ jobs:
           PY
       - run: pytest -q
 
+  frontend-lint:
+    name: Frontend lint + type-check
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install
+      - name: TypeScript type-check
+        run: npx tsc --noEmit
+      - name: ESLint
+        run: npx next lint
+
   frontend-build:
     name: Frontend build
     runs-on: ubuntu-latest
@@ -83,4 +100,120 @@ jobs:
         with:
           node-version: 20
       - run: npm install
+      - name: npm audit (high/critical only)
+        run: npm audit --audit-level=high
+        continue-on-error: false
       - run: npm run build
+
+  dependency-scan:
+    name: Dependency vulnerability scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: pip-audit (backend)
+        run: |
+          pip install pip-audit
+          pip install -r backend/requirements.txt
+          pip-audit -r backend/requirements.txt --min-severity high
+
+  deploy:
+    name: Build, push ECR & deploy ECS
+    needs: [backend-tests, frontend-lint, frontend-build, dependency-scan]
+    # Only deploy on pushes to main — not on PRs.
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      AWS_REGION: ap-southeast-2
+      ECR_REGISTRY: ${{ secrets.ECR_REGISTRY }}
+      CLUSTER: dataautomated-prod
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region:            ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build & push backend image
+        run: |
+          docker build -t $ECR_REGISTRY/dataautomated-backend:${{ github.sha }} backend/
+          docker push $ECR_REGISTRY/dataautomated-backend:${{ github.sha }}
+          docker tag  $ECR_REGISTRY/dataautomated-backend:${{ github.sha }} \
+                      $ECR_REGISTRY/dataautomated-backend:latest
+          docker push $ECR_REGISTRY/dataautomated-backend:latest
+
+      - name: Build & push frontend image
+        # NEXT_PUBLIC_API_URL is baked at build time by Next.js — it MUST be
+        # passed as a --build-arg, NOT injected at container runtime.
+        # Set the NEXT_PUBLIC_API_URL repo variable (Settings → Variables) to the
+        # backend ALB/domain URL. Fallback keeps the ALB URL if var is unset.
+        run: |
+          docker build \
+            --build-arg NEXT_PUBLIC_API_URL=${{ vars.NEXT_PUBLIC_API_URL || 'http://dataautomated-alb-1029620184.ap-southeast-2.elb.amazonaws.com:8000' }} \
+            -t $ECR_REGISTRY/dataautomated-frontend:${{ github.sha }} \
+            frontend/
+          docker push $ECR_REGISTRY/dataautomated-frontend:${{ github.sha }}
+          docker tag  $ECR_REGISTRY/dataautomated-frontend:${{ github.sha }} \
+                      $ECR_REGISTRY/dataautomated-frontend:latest
+          docker push $ECR_REGISTRY/dataautomated-frontend:latest
+
+      - name: Render backend task definition
+        id: render-backend
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: .github/ecs/backend-task-definition.json
+          container-name:  backend
+          image:           ${{ env.ECR_REGISTRY }}/dataautomated-backend:${{ github.sha }}
+
+      - name: Render frontend task definition
+        id: render-frontend
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: .github/ecs/frontend-task-definition.json
+          container-name:  frontend
+          image:           ${{ env.ECR_REGISTRY }}/dataautomated-frontend:${{ github.sha }}
+
+      - name: Run database migrations
+        run: |
+          aws ecs run-task \
+            --cluster $CLUSTER \
+            --task-definition dataautomated-backend \
+            --launch-type FARGATE \
+            --network-configuration '${{ vars.ECS_NETWORK_CONFIG }}' \
+            --overrides '{"containerOverrides":[{"name":"backend","command":["alembic","upgrade","head"]}]}' \
+            --output json | tee /tmp/migration-run.json
+          TASK_ARN=$(jq -r '.tasks[0].taskArn' /tmp/migration-run.json)
+          echo "Waiting for migration task $TASK_ARN..."
+          aws ecs wait tasks-stopped --cluster $CLUSTER --tasks "$TASK_ARN"
+          EXIT_CODE=$(aws ecs describe-tasks --cluster $CLUSTER --tasks "$TASK_ARN" \
+            --query 'tasks[0].containers[0].exitCode' --output text)
+          if [ "$EXIT_CODE" != "0" ]; then
+            echo "Migration failed (exit $EXIT_CODE)" && exit 1
+          fi
+          echo "Migration completed successfully."
+
+      - name: Deploy backend to ECS
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+        with:
+          task-definition:  ${{ steps.render-backend.outputs.task-definition }}
+          service:          dataautomated-backend
+          cluster:          ${{ env.CLUSTER }}
+          wait-for-service-stability: true
+
+      - name: Deploy frontend to ECS
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+        with:
+          task-definition:  ${{ steps.render-frontend.outputs.task-definition }}
+          service:          dataautomated-frontend
+          cluster:          ${{ env.CLUSTER }}
+          wait-for-service-stability: true

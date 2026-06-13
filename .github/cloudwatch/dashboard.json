@@ -1,0 +1,178 @@
+{
+  "_comment": "AUTHORED — UNVERIFIED (no live AWS access). Deploy with: aws cloudwatch put-dashboard --dashboard-name DataAutomated-Prod --dashboard-body file://dashboard.json --region ap-southeast-2",
+  "widgets": [
+    {
+      "type": "text",
+      "x": 0, "y": 0, "width": 24, "height": 1,
+      "properties": {
+        "markdown": "# DataAutomated.io — Production Dashboard  \nAccount: `456788081187` | Region: `ap-southeast-2` | Cluster: `dataautomated-prod`"
+      }
+    },
+
+    {
+      "type": "metric",
+      "x": 0, "y": 1, "width": 6, "height": 4,
+      "properties": {
+        "title": "ECS Backend — Running Tasks",
+        "metrics": [["AWS/ECS", "RunningTaskCount", "ClusterName", "dataautomated-prod", "ServiceName", "dataautomated-backend"]],
+        "view": "timeSeries", "stat": "Average", "period": 60,
+        "annotations": { "horizontal": [{"value": 2, "label": "Min", "color": "#ff9900"}, {"value": 10, "label": "Max", "color": "#d62728"}] }
+      }
+    },
+    {
+      "type": "metric",
+      "x": 6, "y": 1, "width": 6, "height": 4,
+      "properties": {
+        "title": "ECS Backend — CPU Utilization %",
+        "metrics": [["AWS/ECS", "CPUUtilization", "ClusterName", "dataautomated-prod", "ServiceName", "dataautomated-backend"]],
+        "view": "timeSeries", "stat": "Average", "period": 60,
+        "annotations": { "horizontal": [{"value": 60, "label": "Scale-out threshold", "color": "#ff9900"}] }
+      }
+    },
+    {
+      "type": "metric",
+      "x": 12, "y": 1, "width": 6, "height": 4,
+      "properties": {
+        "title": "ECS Backend — Memory Utilization %",
+        "metrics": [["AWS/ECS", "MemoryUtilization", "ClusterName", "dataautomated-prod", "ServiceName", "dataautomated-backend"]],
+        "view": "timeSeries", "stat": "Average", "period": 60,
+        "annotations": { "horizontal": [{"value": 80, "label": "Warning", "color": "#ff9900"}] }
+      }
+    },
+    {
+      "type": "metric",
+      "x": 18, "y": 1, "width": 6, "height": 4,
+      "properties": {
+        "title": "ECS Frontend — Running Tasks",
+        "metrics": [["AWS/ECS", "RunningTaskCount", "ClusterName", "dataautomated-prod", "ServiceName", "dataautomated-frontend"]],
+        "view": "timeSeries", "stat": "Average", "period": 60
+      }
+    },
+
+    {
+      "type": "metric",
+      "x": 0, "y": 5, "width": 8, "height": 4,
+      "properties": {
+        "title": "ALB — Request Count",
+        "metrics": [["AWS/ApplicationELB", "RequestCount", "LoadBalancer", "app/dataautomated-alb/1029620184"]],
+        "view": "timeSeries", "stat": "Sum", "period": 60
+      }
+    },
+    {
+      "type": "metric",
+      "x": 8, "y": 5, "width": 8, "height": 4,
+      "properties": {
+        "title": "ALB — Target Response Time p99 (ms)",
+        "metrics": [["AWS/ApplicationELB", "TargetResponseTime", "LoadBalancer", "app/dataautomated-alb/1029620184", {"stat": "p99", "id": "p99"}]],
+        "view": "timeSeries", "period": 60,
+        "annotations": { "horizontal": [{"value": 0.3, "label": "300ms target", "color": "#ff9900"}] }
+      }
+    },
+    {
+      "type": "metric",
+      "x": 16, "y": 5, "width": 8, "height": 4,
+      "properties": {
+        "title": "ALB — 4xx / 5xx Error Rates",
+        "metrics": [
+          ["AWS/ApplicationELB", "HTTPCode_Target_4XX_Count", "LoadBalancer", "app/dataautomated-alb/1029620184", {"label": "4xx", "color": "#ff9900"}],
+          ["AWS/ApplicationELB", "HTTPCode_Target_5XX_Count", "LoadBalancer", "app/dataautomated-alb/1029620184", {"label": "5xx", "color": "#d62728"}]
+        ],
+        "view": "timeSeries", "stat": "Sum", "period": 60
+      }
+    },
+
+    {
+      "type": "metric",
+      "x": 0, "y": 9, "width": 8, "height": 4,
+      "properties": {
+        "title": "RDS — CPU Utilization %",
+        "metrics": [["AWS/RDS", "CPUUtilization", "DBInstanceIdentifier", "dataautomated-prod"]],
+        "view": "timeSeries", "stat": "Average", "period": 60,
+        "annotations": { "horizontal": [{"value": 80, "label": "Warning", "color": "#ff9900"}] }
+      }
+    },
+    {
+      "type": "metric",
+      "x": 8, "y": 9, "width": 8, "height": 4,
+      "properties": {
+        "title": "RDS — Database Connections",
+        "metrics": [["AWS/RDS", "DatabaseConnections", "DBInstanceIdentifier", "dataautomated-prod"]],
+        "view": "timeSeries", "stat": "Average", "period": 60,
+        "annotations": { "horizontal": [{"value": 130, "label": "75% of 171 max", "color": "#ff9900"}] }
+      }
+    },
+    {
+      "type": "metric",
+      "x": 16, "y": 9, "width": 8, "height": 4,
+      "properties": {
+        "title": "RDS — Free Storage Space (GB)",
+        "metrics": [["AWS/RDS", "FreeStorageSpace", "DBInstanceIdentifier", "dataautomated-prod", {"id": "fss"}]],
+        "view": "timeSeries", "stat": "Average", "period": 300,
+        "annotations": { "horizontal": [{"value": 5368709120, "label": "5 GB minimum", "color": "#d62728"}] }
+      }
+    },
+
+    {
+      "type": "log",
+      "x": 0, "y": 13, "width": 12, "height": 6,
+      "properties": {
+        "title": "Backend — Auth Failures (401/403)",
+        "query": "SOURCE '/ecs/dataautomated-backend' | fields @timestamp, @message | filter @message like /\"status\": 40[13]/ | sort @timestamp desc | limit 50",
+        "region": "ap-southeast-2",
+        "view": "table"
+      }
+    },
+    {
+      "type": "log",
+      "x": 12, "y": 13, "width": 12, "height": 6,
+      "properties": {
+        "title": "Backend — Agent Errors",
+        "query": "SOURCE '/ecs/dataautomated-backend' | fields @timestamp, @message | filter @message like /ERROR/ or @message like /agent.*failed/ or @message like /report generation failed/ | sort @timestamp desc | limit 50",
+        "region": "ap-southeast-2",
+        "view": "table"
+      }
+    },
+
+    {
+      "type": "log",
+      "x": 0, "y": 19, "width": 12, "height": 5,
+      "properties": {
+        "title": "Webhook Ingestion Events",
+        "query": "SOURCE '/ecs/dataautomated-backend' | fields @timestamp, @message | filter @message like /webhook.ingested/ | sort @timestamp desc | limit 100",
+        "region": "ap-southeast-2",
+        "view": "table"
+      }
+    },
+    {
+      "type": "log",
+      "x": 12, "y": 19, "width": 12, "height": 5,
+      "properties": {
+        "title": "Churn Alert Dispatches",
+        "query": "SOURCE '/ecs/dataautomated-backend' | fields @timestamp, @message | filter @message like /churn_alert/ | sort @timestamp desc | limit 50",
+        "region": "ap-southeast-2",
+        "view": "table"
+      }
+    },
+
+    {
+      "type": "metric",
+      "x": 0, "y": 24, "width": 12, "height": 4,
+      "properties": {
+        "title": "n8n — ECS Running Tasks",
+        "metrics": [["AWS/ECS", "RunningTaskCount", "ClusterName", "dataautomated-prod", "ServiceName", "dataautomated-n8n"]],
+        "view": "timeSeries", "stat": "Average", "period": 60,
+        "annotations": { "horizontal": [{"value": 1, "label": "Expected: 1", "color": "#2ca02c"}] }
+      }
+    },
+    {
+      "type": "log",
+      "x": 12, "y": 24, "width": 12, "height": 4,
+      "properties": {
+        "title": "Rate Limiter 429 Events",
+        "query": "SOURCE '/ecs/dataautomated-backend' | fields @timestamp, @message | filter @message like /429/ | sort @timestamp desc | limit 50",
+        "region": "ap-southeast-2",
+        "view": "table"
+      }
+    }
+  ]
+}

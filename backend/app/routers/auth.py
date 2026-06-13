@@ -20,7 +20,7 @@ from hmac import compare_digest
 from uuid import UUID
 
 import asyncpg
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -122,11 +122,10 @@ async def get_current_user(token: str = Depends(_oauth2_scheme)) -> CurrentUser:
     """
     FastAPI dependency — resolves and validates the bearer token.
 
-    Imported by insights/signals/journeys routers.  Returns CurrentUser with:
-    - id: from DB (UUID object, not str)
-    - client_id: from JWT claim (per MULTI_TENANT_SECURITY §5 — "the tenant claim
-      flows directly into the RLS session context")
-    - role: from DB query (role is not carried in the JWT per spec)
+    Returns CurrentUser with id/client_id/role.  Rebinds identity to DB truth:
+    - user must exist in the DB
+    - DB client_id must match the JWT claim (forged/stale tenant claim → 401)
+    - client must be active (deactivated tenant → 403)
 
     Raises 401 on any token failure — no information leakage about the cause.
     """
@@ -157,7 +156,10 @@ async def get_current_user(token: str = Depends(_oauth2_scheme)) -> CurrentUser:
 
     async with _db.pool.acquire() as conn:
         row: asyncpg.Record | None = await conn.fetchrow(
-            "SELECT id, role FROM users WHERE id = $1",
+            """SELECT u.id, u.role, u.client_id, c.is_active
+               FROM users u
+               JOIN clients c ON c.id = u.client_id
+               WHERE u.id = $1""",
             UUID(user_id),
         )
 
@@ -165,11 +167,48 @@ async def get_current_user(token: str = Depends(_oauth2_scheme)) -> CurrentUser:
         logger.info('{"event": "auth.failure", "reason": "user_not_found", "user_id": "%s"}', user_id)
         raise credentials_exc
 
+    # Verify the JWT tenant claim matches the DB record (prevents forged client_id claims).
+    if str(row["client_id"]) != client_id_str:
+        logger.warning(
+            '{"event": "auth.failure", "reason": "client_id_mismatch", "user_id": "%s"}',
+            user_id,
+        )
+        raise credentials_exc
+
+    if not row["is_active"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account is inactive.",
+        )
+
     return CurrentUser(
         id=row["id"],
-        client_id=UUID(client_id_str),  # authoritative JWT claim per MULTI_TENANT_SECURITY §5
+        client_id=UUID(client_id_str),
         role=row["role"],
     )
+
+
+def require_role(*roles: str):
+    """
+    FastAPI dependency factory — enforces RBAC.
+
+    Usage: Depends(require_role("admin")) or Depends(require_role("admin", "analyst"))
+
+    Roles (CLAUDE.md §5 schema):
+      admin   — full access including credential writes and settings changes
+      analyst — can trigger agent/report runs; read-only on settings
+      viewer  — read-only access only
+
+    n8n server-to-server endpoints bypass RBAC (they use verify_n8n_secret instead).
+    """
+    async def _check(current_user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
+        if current_user.role not in roles:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Insufficient permissions.",
+            )
+        return current_user
+    return _check
 
 
 @router.get("/me", summary="Return the current authenticated user's profile")
@@ -197,6 +236,13 @@ def verify_n8n_secret(provided: str | None) -> None:
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Unauthorized.",
         )
+
+
+async def require_n8n_webhook_secret(
+    x_n8n_webhook_secret: str | None = Header(default=None),
+) -> None:
+    """FastAPI dependency — extracts X-N8N-Webhook-Secret and validates it."""
+    verify_n8n_secret(x_n8n_webhook_secret)
 
 
 async def resolve_service_client(client_id_raw: object) -> UUID:

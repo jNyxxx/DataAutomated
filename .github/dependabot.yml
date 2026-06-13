@@ -1,0 +1,43 @@
+version: 2
+
+updates:
+  # Frontend — npm (Next.js, React, TypeScript, Tailwind, etc.)
+  - package-ecosystem: "npm"
+    directory: "/frontend"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "frontend"
+    commit-message:
+      prefix: "chore(deps)"
+    ignore:
+      # Next.js major upgrades require a planned migration; review manually.
+      - dependency-name: "next"
+        update-types: ["version-update:semver-major"]
+
+  # Backend — pip (FastAPI, asyncpg, LangGraph, etc.)
+  - package-ecosystem: "pip"
+    directory: "/backend"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "backend"
+    commit-message:
+      prefix: "chore(deps)"
+
+  # GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    labels:
+      - "dependencies"
+      - "ci"
+    commit-message:
+      prefix: "chore(deps)"

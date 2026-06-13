@@ -103,7 +103,7 @@ class TestSseAuth:
     async def test_missing_token_is_422(self):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
             resp = await ac.get("/stream/insights")
-        assert resp.status_code == 422  # required query param missing
+        assert resp.status_code == 401  # no auth provided → 401 before param validation
 
     async def test_invalid_token_is_401(self):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:

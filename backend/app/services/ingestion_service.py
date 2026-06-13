@@ -169,12 +169,22 @@ async def run_ingestion(client_id: UUID) -> dict:
             continue
         if not records:
             processed.append(source_type)
-            continue
-        if tool.category == "voc":
-            feedback_count += await _store_feedback(client_id, source["id"], records)
         else:
-            event_count += await _store_events(client_id, records)
-        processed.append(source_type)
+            if tool.category == "voc":
+                feedback_count += await _store_feedback(client_id, source["id"], records)
+            else:
+                event_count += await _store_events(client_id, records)
+            processed.append(source_type)
+
+        # Stamp last_synced_at regardless of whether new records were found —
+        # the tool ran successfully and the source is up-to-date as of now.
+        async with acquire_for_client(client_id) as conn:
+            await conn.execute(
+                "UPDATE data_sources SET last_synced_at = NOW() "
+                "WHERE id = $1 AND client_id = $2",
+                source["id"],
+                client_id,
+            )
 
     logger.info(
         '{"event": "ingestion.complete", "client_id": "%s", '

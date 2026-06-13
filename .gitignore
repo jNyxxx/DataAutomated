@@ -9,6 +9,16 @@
 *.key
 secrets/
 .aws/
+# Root-level AWS/infra policy + secret JSON artifacts (§14 — never commit secrets)
+backend-secret.json
+ecs-trust.json
+n8n-secret.json
+temp-phase9-deploy.json
+read-dataautomated-secrets.json
+reports-bucket-rw.json
+new-n8n-td.json
+fix_n8n.ps1
+setup_n8n.py
 
 # ---- Python (backend) ----
 __pycache__/

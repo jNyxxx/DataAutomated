@@ -23,6 +23,7 @@ services:
     environment:
       # Secrets are injected from AWS Secrets Manager in real deploys (SR-03).
       ENV: production
+      APP_ENV: production
 
   frontend:
     build: !reset null

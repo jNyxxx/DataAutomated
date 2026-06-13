@@ -5,16 +5,13 @@ import { Download, Loader2, AlertCircle } from 'lucide-react';
 
 // Presigned URLs are short-lived (15 min) and minted server-side per click —
 // the page never holds a live S3 link (objects are private, §14).
-export default function ReportDownload({ reportId, token }: { reportId: string; token: string }) {
+export default function ReportDownload({ reportId }: { reportId: string }) {
   const [status, setStatus] = useState<'idle' | 'loading' | 'error'>('idle');
 
   async function download() {
     setStatus('loading');
     try {
-      const res = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'}/api/reports/${reportId}/download-url`,
-        { headers: { Authorization: `Bearer ${token}` } },
-      );
+      const res = await fetch(`/api/backend/api/reports/${reportId}/download-url`);
       if (!res.ok) throw new Error(`${res.status}`);
       const { url } = (await res.json()) as { url: string };
       window.open(url, '_blank', 'noopener');

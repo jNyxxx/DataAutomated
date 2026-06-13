@@ -4,6 +4,8 @@
 > **Sources of truth:** `Product Brief v1.0` + `Technical Build Guide for Junex` (Brief = *what/why*; Guide = *how/order*; this file fuses both).
 > **Authority:** The operating constitution for every Claude Code session here. A rule here is **final** unless a human maintainer approves a deviation in writing.
 
+> **CURRENT MODE — LOCAL TESTING ONLY (June 2026):** No custom domain, no premium DNS, no SSL cert. The goal right now is to verify the full system works end-to-end locally (`docker-compose up`) before any production deployment. All verification targets `localhost`. Do not generate domain-dependent URLs, Stripe webhooks, or anything requiring `app.dataautomated.io` / `api.dataautomated.io` until this mode is explicitly lifted by the maintainer.
+
 ---
 
 ## HOW TO USE THIS FILE (READ FIRST, EVERY SESSION)

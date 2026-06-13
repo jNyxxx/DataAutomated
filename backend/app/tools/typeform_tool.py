@@ -78,7 +78,7 @@ class TypeformResponseTool(DataAutomatedBaseTool):
             since_ts = datetime.now(tz=timezone.utc) - timedelta(hours=since_hours)
             url = f"https://api.typeform.com/forms/{form_id}/responses"
             headers = {"Authorization": f"Bearer {access_token}"}
-            params = {"since": since_ts.isoformat()}
+            params = {"since": since_ts.replace(microsecond=0).isoformat().replace("+00:00", "Z")}
 
             async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await async_retry_with_backoff(

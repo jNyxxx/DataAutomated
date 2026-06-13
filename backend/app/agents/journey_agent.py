@@ -2,13 +2,18 @@
 Behavioral Journey agent (CLAUDE.md §7.3; AGENT_ARCHITECTURE.md §3.3).
 
 Graph: fetch_events -> define_funnels -> calculate_dropoffs
-       -> diagnose_friction -> generate_recommendations -> store -> END
+       -> diagnose_friction -> rag_context -> generate_recommendations -> store -> END
 
 Phase 4c scope: fully functional. Unlike the Competitive Signal agent, this agent has NO
 Phase 5 dependency — it reads behavioral events directly from the `journey_events` table
 (those rows are *populated* by P5 ingestion tools, but the analysis runs on whatever is
 already present). Funnel reconstruction and drop-off math are deterministic; only friction
 diagnosis and recommendation phrasing use the LLM.
+
+Phase 7 (RAG): rag_context_node retrieves relevant knowledge-base chunks (playbooks,
+industry benchmarks for friction patterns) before generate_recommendations_node so the
+LLM can ground recommendations in historical data.  Uses the central embedding_service
+(CLAUDE.md §9).
 
 Tenant contract (CLAUDE §6; MULTI_TENANT_SECURITY §4):
   - All DB access goes through acquire_for_client() — never asyncpg.connect().
@@ -38,6 +43,7 @@ from pydantic import BaseModel, Field, ValidationError
 from app.config import settings
 from app.database import acquire_for_client
 from app.services.audit_service import record_audit
+from app.services.embedding_service import retrieve_similar
 from app.services.llm_json import loads_tolerant
 
 logger = logging.getLogger("dataautomated")
@@ -63,6 +69,7 @@ class JourneyState(TypedDict):
     funnel_steps: list[dict]          # {step, event_type, count}
     drop_off_analysis: list[dict]     # {funnel_step, event_type, entries, exits, drop_off_rate}
     friction_diagnosis: list[dict]    # {funnel_step, drop_off_rate, friction_cause, friction_score}
+    rag_context: list[str]            # retrieved knowledge-base chunks (§9)
     recommendations: list[dict]       # diagnosis + {recommendation, projected_lift}
     narrative: str
 
@@ -226,6 +233,36 @@ async def diagnose_friction_node(state: JourneyState, llm: Any) -> dict:
     return {"friction_diagnosis": diagnosis}
 
 
+async def rag_context_node(state: JourneyState) -> dict:
+    """Retrieve relevant playbooks and benchmarks before generating recommendations (CLAUDE.md §9)."""
+    diagnosis = state["friction_diagnosis"]
+    if not diagnosis:
+        return {"rag_context": []}
+
+    causes = list({d.get("friction_cause", "") for d in diagnosis if d.get("friction_cause")})
+    steps = [d.get("funnel_step", "") for d in diagnosis[:3]]
+    query = (
+        f"Funnel friction patterns: {', '.join(causes)}, "
+        f"steps: {', '.join(steps)}"
+    )
+    try:
+        similar = await retrieve_similar(query, client_id=state["client_id"], top_k=5)
+        context = [r["content"] for r in similar]
+        logger.info(
+            '{"event": "journey.rag_context", "client_id": "%s", "chunks": %d}',
+            state["client_id"],
+            len(context),
+        )
+        return {"rag_context": context}
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            '{"event": "journey.rag_context_failed", "client_id": "%s", "error": "%s"}',
+            state["client_id"],
+            str(exc),
+        )
+        return {"rag_context": []}
+
+
 async def generate_recommendations_node(state: JourneyState, llm: Any) -> dict:
     """Generate a recommendation + projected lift per friction point, plus a CEO narrative."""
     diagnosis = state["friction_diagnosis"]
@@ -245,9 +282,18 @@ async def generate_recommendations_node(state: JourneyState, llm: Any) -> dict:
         "fix and estimate the conversion lift if resolved. Also write a short executive "
         "narrative. Base everything ONLY on the provided data."
     )
+    rag_ctx = state.get("rag_context", [])
+    rag_section = ""
+    if rag_ctx:
+        rag_section = (
+            "\n\nRelevant playbooks and industry benchmarks:\n"
+            + "\n".join(f"  - {c}" for c in rag_ctx)
+            + "\n"
+        )
     user_msg = (
         f"Address these {len(diagnosis)} friction points:\n\n"
         + "\n".join(blocks)
+        + rag_section
         + "\n\nReturn ONLY a JSON object with two keys: "
         f'"recommendations" (array of exactly {len(diagnosis)} objects in order, each with '
         '"recommendation" (string) and "projected_lift" (float 0.0 to 1.0)), and '
@@ -354,6 +400,7 @@ def _build_journey_graph(llm: Any):
     workflow.add_node("define_funnels", define_funnels_node)
     workflow.add_node("calculate_dropoffs", calculate_dropoffs_node)
     workflow.add_node("diagnose_friction", _diagnose)
+    workflow.add_node("rag_context", rag_context_node)
     workflow.add_node("generate_recommendations", _recommend)
     workflow.add_node("store", store_node)
 
@@ -361,7 +408,8 @@ def _build_journey_graph(llm: Any):
     workflow.add_edge("fetch_events", "define_funnels")
     workflow.add_edge("define_funnels", "calculate_dropoffs")
     workflow.add_edge("calculate_dropoffs", "diagnose_friction")
-    workflow.add_edge("diagnose_friction", "generate_recommendations")
+    workflow.add_edge("diagnose_friction", "rag_context")
+    workflow.add_edge("rag_context", "generate_recommendations")
     workflow.add_edge("generate_recommendations", "store")
     workflow.add_edge("store", END)
 
@@ -398,6 +446,7 @@ async def run_journey_analysis(client_id: UUID) -> None:
         "funnel_steps": [],
         "drop_off_analysis": [],
         "friction_diagnosis": [],
+        "rag_context": [],
         "recommendations": [],
         "narrative": "",
     }

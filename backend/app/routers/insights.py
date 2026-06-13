@@ -17,10 +17,12 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import secrets as _secrets
+import time
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Header, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
 from app.config import settings
@@ -28,6 +30,7 @@ from app.database import acquire_for_client
 from app.routers.auth import (
     CurrentUser,
     get_current_user,
+    require_role,
     resolve_service_client,
     verify_n8n_secret,
 )
@@ -39,6 +42,16 @@ router = APIRouter(prefix="/insights", tags=["VoC Insights"])
 
 # Secondary router (no prefix) — for paths that must start with /api/ or /stream/
 _extra = APIRouter(tags=["VoC Insights"])
+
+# ---------------------------------------------------------------------------
+# SSE ticket store — short-lived single-use tokens so the long-lived JWT
+# never appears in server access logs (CLAUDE.md §14 / §12 security note).
+# In-memory dict is fine for a single-process deployment; for multi-replica
+# ECS (2+ tasks without sticky sessions) replace with a DB-backed or Redis
+# ticket store. TTL: 60 s — enough for a page load to open the EventSource.
+# ---------------------------------------------------------------------------
+_SSE_TICKETS: dict[str, tuple[UUID, float]] = {}  # ticket → (client_id, expiry_monotonic)
+_SSE_TICKET_TTL = 60
 
 
 # ---------------------------------------------------------------------------
@@ -77,7 +90,7 @@ async def _dispatch_voc(
 @router.post("/analyze", status_code=202, summary="Trigger VoC analysis (async)")
 async def analyze(
     background_tasks: BackgroundTasks,
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_role("admin", "analyst")),
 ):
     return await _dispatch_voc(background_tasks, current_user.client_id)
 
@@ -85,6 +98,36 @@ async def analyze(
 # ---------------------------------------------------------------------------
 # /insights/latest
 # ---------------------------------------------------------------------------
+
+@router.get("/", summary="Paginated VoC insights list for the caller's client")
+async def list_insights(
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    async with acquire_for_client(current_user.client_id) as conn:
+        total = await conn.fetchval(
+            "SELECT COUNT(*) FROM feedback_insights WHERE client_id = $1",
+            current_user.client_id,
+        )
+        rows = await conn.fetch(
+            "SELECT id, sentiment_score, sentiment_label, urgency_score, "
+            "       themes, narrative, churn_risk, period_start, period_end, created_at "
+            "FROM feedback_insights "
+            "WHERE client_id = $1 "
+            "ORDER BY created_at DESC LIMIT $2 OFFSET $3",
+            current_user.client_id,
+            limit,
+            offset,
+        )
+    return {
+        "insights": [
+            {k: str(v) if v is not None else None for k, v in dict(r).items()}
+            for r in rows
+        ],
+        "total": total or 0,
+    }
+
 
 @router.get("/latest", summary="Latest VoC insight for the caller's client")
 async def latest(current_user: CurrentUser = Depends(get_current_user)):
@@ -103,6 +146,29 @@ async def latest(current_user: CurrentUser = Depends(get_current_user)):
         )
     if row is None:
         return {"insight": None}
+    return {"insight": {k: str(v) if v is not None else None for k, v in dict(row).items()}}
+
+
+@router.get("/{insight_id}", summary="Single VoC insight by ID")
+async def get_insight(
+    insight_id: str,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    try:
+        insight_uuid = UUID(insight_id)
+    except (ValueError, AttributeError):
+        raise HTTPException(status_code=404, detail="Insight not found.")
+    async with acquire_for_client(current_user.client_id) as conn:
+        row = await conn.fetchrow(
+            "SELECT id, sentiment_score, sentiment_label, urgency_score, "
+            "       themes, narrative, churn_risk, period_start, period_end, created_at "
+            "FROM feedback_insights "
+            "WHERE client_id = $1 AND id = $2",
+            current_user.client_id,
+            insight_uuid,
+        )
+    if row is None:
+        raise HTTPException(status_code=404, detail="Insight not found.")
     return {"insight": {k: str(v) if v is not None else None for k, v in dict(row).items()}}
 
 
@@ -129,35 +195,101 @@ async def _fetch_insights_since(conn, client_id: UUID, since) -> list:
     )
 
 
+async def _fetch_signals_since(conn, client_id: UUID, since) -> list:
+    """Competitive signal rows detected strictly after the `since` watermark, oldest-first.
+    competitive_signals uses detected_at (not created_at) as its primary timestamp."""
+    return await conn.fetch(
+        "SELECT id, competitor_name, signal_type, detected_at "
+        "FROM competitive_signals "
+        "WHERE client_id = $1 AND detected_at > $2 "
+        "ORDER BY detected_at ASC",
+        client_id, since,
+    )
+
+
+async def _fetch_journeys_since(conn, client_id: UUID, since) -> list:
+    """Journey insight rows created strictly after the `since` watermark, oldest-first."""
+    return await conn.fetch(
+        "SELECT id, funnel_step, drop_off_rate, friction_cause, created_at "
+        "FROM journey_insights "
+        "WHERE client_id = $1 AND created_at > $2 "
+        "ORDER BY created_at ASC",
+        client_id, since,
+    )
+
+
+@_extra.post("/api/sse-ticket", status_code=200, summary="Issue a short-lived SSE access ticket")
+async def issue_sse_ticket(current_user: CurrentUser = Depends(get_current_user)):
+    """
+    Exchange a JWT bearer token for a 60-second single-use ticket.
+    The frontend should call this endpoint (with Authorization header) and then
+    open EventSource using the returned ticket as a query param instead of the
+    raw JWT — prevents the long-lived token from appearing in access logs (§14).
+    """
+    ticket = _secrets.token_urlsafe(32)
+    _SSE_TICKETS[ticket] = (current_user.client_id, time.monotonic() + _SSE_TICKET_TTL)
+    return {"ticket": ticket, "expires_in": _SSE_TICKET_TTL}
+
+
 @_extra.get("/stream/insights", summary="SSE stream of new VoC insights")
-async def stream_insights(token: str = Query(..., description="JWT bearer; EventSource cannot set headers")):
+async def stream_insights(
+    ticket: str | None = Query(default=None, description="Short-lived ticket from POST /api/sse-ticket (preferred)"),
+    token: str | None = Query(default=None, description="JWT bearer fallback — prefer ticket to avoid log leakage"),
+):
     """
     Server-Sent Events stream (CLAUDE.md §12).  Polls feedback_insights every 5s
     and pushes rows created after connect.  Client closes the EventSource to stop.
 
-    Auth: the token is taken from the query string because the browser EventSource
-    API cannot set an Authorization header.  It is validated by get_current_user
-    exactly like a bearer token (401 on failure).
-    SECURITY NOTE: a JWT in the URL can leak into access logs / proxies; acceptable
-    for the local/MVP cross-origin setup, but in production (same-origin via
-    CloudFront/ALB) prefer a cookie or a short-lived single-use SSE ticket.
+    Auth: prefer POST /api/sse-ticket → use returned ticket here.  Raw JWT query
+    param is accepted as a fallback but should not be used in production (token
+    appears in access logs / proxies).  In same-origin CloudFront/ALB production
+    a secure HttpOnly cookie is the ideal long-term approach.
     """
-    current_user = await get_current_user(token)
+    if ticket is not None:
+        entry = _SSE_TICKETS.pop(ticket, None)
+        if entry is None or time.monotonic() > entry[1]:
+            raise HTTPException(status_code=401, detail="SSE ticket invalid or expired.")
+        client_id = entry[0]
+    elif token is not None:
+        current_user = await get_current_user(token)
+        client_id = current_user.client_id
+    else:
+        raise HTTPException(status_code=401, detail="Authentication required.")
 
     async def _generator():
-        # Seed the watermark to "now" so a fresh connection does not replay history.
-        async with acquire_for_client(current_user.client_id) as conn:
-            last_seen = await conn.fetchval(
-                "SELECT COALESCE(MAX(created_at), NOW()) "
-                "FROM feedback_insights WHERE client_id = $1",
-                current_user.client_id,
+        # Seed per-table watermarks to "now" — prevents replaying existing rows.
+        async with acquire_for_client(client_id) as conn:
+            last_insight = await conn.fetchval(
+                "SELECT COALESCE(MAX(created_at), NOW()) FROM feedback_insights WHERE client_id = $1",
+                client_id,
+            )
+            last_signal = await conn.fetchval(
+                "SELECT COALESCE(MAX(detected_at), NOW()) FROM competitive_signals WHERE client_id = $1",
+                client_id,
+            )
+            last_journey = await conn.fetchval(
+                "SELECT COALESCE(MAX(created_at), NOW()) FROM journey_insights WHERE client_id = $1",
+                client_id,
             )
         while True:
-            async with acquire_for_client(current_user.client_id) as conn:
-                rows = await _fetch_insights_since(conn, current_user.client_id, last_seen)
-            for row in rows:
-                last_seen = row["created_at"]
+            async with acquire_for_client(client_id) as conn:
+                insight_rows = await _fetch_insights_since(conn, client_id, last_insight)
+                signal_rows  = await _fetch_signals_since(conn, client_id, last_signal)
+                journey_rows = await _fetch_journeys_since(conn, client_id, last_journey)
+            for row in insight_rows:
+                last_insight = row["created_at"]
                 payload = {k: str(v) if v is not None else None for k, v in dict(row).items()}
+                payload["event_type"] = "insight"
+                yield f"data: {json.dumps(payload)}\n\n"
+            for row in signal_rows:
+                last_signal = row["detected_at"]
+                payload = {k: str(v) if v is not None else None for k, v in dict(row).items()}
+                payload["event_type"] = "signal"
+                yield f"data: {json.dumps(payload)}\n\n"
+            for row in journey_rows:
+                last_journey = row["created_at"]
+                payload = {k: str(v) if v is not None else None for k, v in dict(row).items()}
+                payload["event_type"] = "journey"
                 yield f"data: {json.dumps(payload)}\n\n"
             await asyncio.sleep(5)
 

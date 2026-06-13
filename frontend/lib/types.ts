@@ -27,7 +27,7 @@ export interface Signal {
   strategic_context: string | null;
   urgency: 'critical' | 'high' | 'medium' | 'low' | null;
   detected_at: string | null;
-  is_read: string | null;
+  is_read: boolean | null;
 }
 
 export interface Journey {

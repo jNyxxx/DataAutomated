@@ -12,6 +12,7 @@ const API_URL =
 export async function apiRequest<T>(path: string, token?: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_URL}${path}`, {
     ...init,
+    cache: 'no-store',
     headers: {
       'Content-Type': 'application/json',
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -24,16 +25,15 @@ export async function apiRequest<T>(path: string, token?: string, init?: Request
   return res.json() as Promise<T>;
 }
 
-export async function login(email: string, password: string): Promise<string> {
-  const body = new URLSearchParams({ username: email, password });
-  const res = await fetch(`${API_URL}/auth/token`, {
+// Login goes through the Next.js route handler /api/auth/login which sets an
+// HttpOnly cookie — the raw JWT is never returned to browser JS (CLAUDE.md §14 P2.8).
+export async function login(email: string, password: string): Promise<void> {
+  const res = await fetch('/api/auth/login', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: body.toString(),
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password }),
   });
-  if (!res.ok) throw new Error('Invalid credentials');
-  const data = await res.json() as { access_token: string };
-  return data.access_token;
+  if (!res.ok) throw new Error(`auth:${res.status}`);
 }
 
 export async function fetchDashboardSummary(token: string): Promise<DashboardSummary> {
@@ -44,12 +44,48 @@ export async function fetchLatestInsight(token: string): Promise<{ insight: Insi
   return apiRequest<{ insight: Insight | null }>('/insights/latest', token);
 }
 
-export async function fetchSignals(token: string): Promise<{ signals: Signal[] }> {
-  return apiRequest<{ signals: Signal[] }>('/signals/latest', token);
+export async function fetchInsightsList(
+  token: string,
+  limit = 20,
+  offset = 0,
+): Promise<{ insights: Insight[]; total: number }> {
+  return apiRequest<{ insights: Insight[]; total: number }>(
+    `/insights/?limit=${limit}&offset=${offset}`,
+    token,
+  );
 }
 
-export async function fetchJourneys(token: string): Promise<{ insights: Journey[] }> {
-  return apiRequest<{ insights: Journey[] }>('/journeys/latest', token);
+export async function fetchInsightById(token: string, id: string): Promise<{ insight: Insight | null }> {
+  return apiRequest<{ insight: Insight | null }>(`/insights/${id}`, token);
+}
+
+export async function fetchSignals(
+  token: string,
+  limit = 20,
+  offset = 0,
+): Promise<{ signals: Signal[]; total: number }> {
+  return apiRequest<{ signals: Signal[]; total: number }>(
+    `/signals/latest?limit=${limit}&offset=${offset}`,
+    token,
+  );
+}
+
+export async function fetchJourneys(
+  token: string,
+  limit = 20,
+  offset = 0,
+): Promise<{ insights: Journey[]; total: number }> {
+  return apiRequest<{ insights: Journey[]; total: number }>(
+    `/journeys/latest?limit=${limit}&offset=${offset}`,
+    token,
+  );
+}
+
+export async function fetchSignalById(
+  token: string,
+  id: string,
+): Promise<{ signal: Signal | null }> {
+  return apiRequest<{ signal: Signal | null }>(`/signals/${id}`, token);
 }
 
 export async function triggerAnalysis(

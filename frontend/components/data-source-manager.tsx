@@ -1,185 +1,168 @@
 'use client';
 
 import { useState } from 'react';
-import { CheckCircle, XCircle, CheckCheck } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { Plus, Check, Clock, Zap, ChevronRight } from 'lucide-react';
+import {
+  SOURCE_LABELS, SOURCE_ICONS, SOURCE_DESCRIPTIONS,
+  SOURCE_DATA_COLLECTED, SOURCE_SYNC_FREQ, BETA_TYPES,
+} from '@/lib/sources';
 
 interface Props {
-  token: string;
   categories: Record<string, string[]>;
-  sourceLabels: Record<string, string>;
-  /** Active source types this client has already connected — these buttons are disabled. */
+  /** Source types the client has already connected (any status). */
   connectedTypes?: string[];
 }
 
-export default function DataSourceManager({ token, categories, sourceLabels, connectedTypes = [] }: Props) {
-  const [sourceType, setSourceType] = useState('');
-  const [status, setStatus]         = useState<'idle' | 'loading' | 'done' | 'error'>('idle');
-  const [errorMsg, setErrorMsg]     = useState('');
+type ConnectPhase = 'idle' | 'connecting' | 'done' | 'error';
 
+export default function DataSourceManager({ categories, connectedTypes = [] }: Props) {
+  const router = useRouter();
+  const [connecting, setConnecting] = useState<Record<string, ConnectPhase>>({});
+  const [errors, setErrors] = useState<Record<string, string>>({});
   const connectedSet = new Set(connectedTypes);
 
-  async function connect() {
-    if (!sourceType) return;
-    // Client-side guard — mirrors the backend 409 constraint.
-    if (connectedSet.has(sourceType)) {
-      setErrorMsg(`${sourceLabels[sourceType] ?? sourceType} is already connected.`);
-      setStatus('error');
-      return;
-    }
-    setStatus('loading');
-    setErrorMsg('');
+  async function handleConnect(sourceType: string) {
+    if (connectedSet.has(sourceType)) return;
+    setConnecting((prev) => ({ ...prev, [sourceType]: 'connecting' }));
+    setErrors((prev) => { const n = { ...prev }; delete n[sourceType]; return n; });
+
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'}/api/data-sources`, {
+      const res = await fetch('/api/backend/api/data-sources', {
         method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ source_type: sourceType, credentials: {}, config: {} }),
       });
       if (!res.ok) {
         const data = await res.json() as { detail?: string };
-        // Surface the backend 409 message directly — it is already user-friendly.
-        setErrorMsg(data.detail ?? 'Connection failed');
-        setStatus('error');
+        setErrors((prev) => ({ ...prev, [sourceType]: data.detail ?? 'Connection failed' }));
+        setConnecting((prev) => ({ ...prev, [sourceType]: 'error' }));
+        setTimeout(() => setConnecting((prev) => ({ ...prev, [sourceType]: 'idle' })), 3000);
         return;
       }
-      setStatus('done');
-      setSourceType('');
-      setTimeout(() => { setStatus('idle'); window.location.reload(); }, 1500);
+      setConnecting((prev) => ({ ...prev, [sourceType]: 'done' }));
+      setTimeout(() => router.refresh(), 1200);
     } catch {
-      setStatus('error');
-      setErrorMsg('Network error — check your connection');
+      setErrors((prev) => ({ ...prev, [sourceType]: 'Network error' }));
+      setConnecting((prev) => ({ ...prev, [sourceType]: 'error' }));
+      setTimeout(() => setConnecting((prev) => ({ ...prev, [sourceType]: 'idle' })), 3000);
     }
   }
 
   return (
-    <div
-      className="rounded-xl p-5 space-y-5"
-      style={{
-        background: '#151E35',
-        border: '1px solid rgba(148,163,184,0.09)',
-      }}
-    >
-      <p className="text-xs" style={{ color: '#64748B' }}>
-        Select an integration type to connect. You will configure credentials after the initial connection.
-        Each source type can only be connected once.
-      </p>
+    <div className="space-y-8">
+      {Object.entries(categories).map(([category, types]) => {
+        const available = types.filter((t) => !connectedSet.has(t));
+        if (available.length === 0) return null;
 
-      {/* Category groups */}
-      <div className="space-y-4">
-        {Object.entries(categories).map(([category, types]) => (
+        return (
           <div key={category}>
-            <div
-              className="text-[10px] font-semibold uppercase tracking-widest mb-2"
-              style={{ color: '#334155' }}
-            >
-              {category}
+            {/* Category header */}
+            <div className="flex items-center gap-2.5 mb-4">
+              <div className="h-px flex-1" style={{ background: 'rgba(148,163,184,0.08)' }} />
+              <span className="text-[11px] font-semibold uppercase tracking-widest px-2" style={{ color: '#334155' }}>
+                {category}
+              </span>
+              <div className="h-px flex-1" style={{ background: 'rgba(148,163,184,0.08)' }} />
             </div>
-            <div className="flex flex-wrap gap-2">
-              {types.map((type) => {
-                const isConnected = connectedSet.has(type);
-                const isSelected  = sourceType === type;
+
+            {/* Integration cards */}
+            <div className="grid gap-3">
+              {available.map((sourceType) => {
+                const phase = connecting[sourceType] ?? 'idle';
+                const isConnected = connectedSet.has(sourceType);
+                const isBeta = BETA_TYPES.has(sourceType);
+                const label = SOURCE_LABELS[sourceType] ?? sourceType;
+                const icon = SOURCE_ICONS[sourceType] ?? '🔌';
+                const description = SOURCE_DESCRIPTIONS[sourceType] ?? '';
+                const dataCollected = SOURCE_DATA_COLLECTED[sourceType] ?? '';
+                const syncFreq = SOURCE_SYNC_FREQ[sourceType] ?? '';
+
                 return (
-                  <button
-                    key={type}
-                    onClick={() => {
-                      if (!isConnected) setSourceType(type === sourceType ? '' : type);
+                  <div
+                    key={sourceType}
+                    className="group flex items-center gap-4 px-5 py-4 rounded-xl transition-colors duration-150"
+                    style={{
+                      background: '#131C30',
+                      border: '1px solid rgba(148,163,184,0.09)',
                     }}
-                    disabled={isConnected}
-                    title={isConnected ? `${sourceLabels[type] ?? type} is already connected` : undefined}
-                    className="px-3 py-1.5 rounded-lg text-sm transition-all duration-150 flex items-center gap-1.5"
-                    style={
-                      isConnected
-                        ? {
-                            background: 'rgba(16,185,129,0.07)',
-                            border: '1px solid rgba(16,185,129,0.20)',
-                            color: '#34D399',
-                            cursor: 'not-allowed',
-                            opacity: 0.75,
-                          }
-                        : isSelected
-                        ? {
-                            background: 'rgba(99,102,241,0.15)',
-                            border: '1px solid rgba(99,102,241,0.45)',
-                            color: '#A5B4FC',
-                            boxShadow: '0 0 12px rgba(99,102,241,0.15)',
-                            cursor: 'pointer',
-                          }
-                        : {
-                            background: 'rgba(255,255,255,0.03)',
-                            border: '1px solid rgba(148,163,184,0.11)',
-                            color: '#94A3B8',
-                            cursor: 'pointer',
-                          }
-                    }
+                    onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.borderColor = 'rgba(99,102,241,0.18)'; }}
+                    onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.borderColor = 'rgba(148,163,184,0.09)'; }}
                   >
-                    {isConnected && <CheckCheck size={12} />}
-                    {sourceLabels[type] ?? type}
-                    {isConnected && (
-                      <span
-                        className="ml-1 text-[10px] font-semibold uppercase tracking-wide"
-                        style={{ color: 'rgba(52,211,153,0.7)' }}
-                      >
-                        Connected
-                      </span>
-                    )}
-                  </button>
+                    {/* Icon */}
+                    <div
+                      className="w-10 h-10 rounded-xl flex items-center justify-center text-lg shrink-0"
+                      style={{ background: 'rgba(99,102,241,0.07)', border: '1px solid rgba(99,102,241,0.12)' }}
+                    >
+                      {icon}
+                    </div>
+
+                    {/* Info */}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-sm font-semibold" style={{ color: '#E2E8F0' }}>{label}</span>
+                        {isBeta && (
+                          <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded" style={{ background: 'rgba(245,158,11,0.08)', color: '#F59E0B', border: '1px solid rgba(245,158,11,0.18)' }}>
+                            Beta
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs mt-0.5 truncate" style={{ color: '#475569' }}>{description}</p>
+                      <div className="flex items-center gap-3 mt-1.5 flex-wrap">
+                        {dataCollected && (
+                          <span className="text-[11px]" style={{ color: '#334155' }}>{dataCollected}</span>
+                        )}
+                        {syncFreq && (
+                          <span className="flex items-center gap-1 text-[11px]" style={{ color: '#334155' }}>
+                            <Clock size={10} />
+                            {syncFreq}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Action */}
+                    <div className="shrink-0">
+                      {isConnected ? (
+                        <span className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg" style={{ background: 'rgba(16,185,129,0.08)', color: '#34D399', border: '1px solid rgba(16,185,129,0.18)' }}>
+                          <Check size={12} /> Connected
+                        </span>
+                      ) : phase === 'connecting' ? (
+                        <span className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg" style={{ color: '#818CF8', border: '1px solid rgba(99,102,241,0.18)' }}>
+                          <svg className="animate-spin w-3 h-3" viewBox="0 0 24 24" fill="none">
+                            <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" strokeOpacity="0.2" />
+                            <path d="M12 2a10 10 0 0 1 10 10" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+                          </svg>
+                          Connecting…
+                        </span>
+                      ) : phase === 'done' ? (
+                        <span className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg" style={{ background: 'rgba(16,185,129,0.10)', color: '#34D399', border: '1px solid rgba(16,185,129,0.20)' }}>
+                          <Zap size={12} /> Added
+                        </span>
+                      ) : phase === 'error' ? (
+                        <span className="text-xs px-3 py-1.5 rounded-lg" style={{ background: 'rgba(239,68,68,0.08)', color: '#F87171', border: '1px solid rgba(239,68,68,0.18)' }} title={errors[sourceType]}>
+                          Failed
+                        </span>
+                      ) : (
+                        <button
+                          onClick={() => handleConnect(sourceType)}
+                          className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg transition-all duration-150"
+                          style={{ background: 'rgba(99,102,241,0.10)', color: '#818CF8', border: '1px solid rgba(99,102,241,0.20)' }}
+                          onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = 'rgba(99,102,241,0.18)'; }}
+                          onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = 'rgba(99,102,241,0.10)'; }}
+                        >
+                          <Plus size={12} /> Connect
+                          <ChevronRight size={11} style={{ opacity: 0.6 }} />
+                        </button>
+                      )}
+                    </div>
+                  </div>
                 );
               })}
             </div>
           </div>
-        ))}
-      </div>
-
-      {/* Connect action */}
-      {sourceType && !connectedSet.has(sourceType) && (
-        <div
-          className="pt-4 flex items-center gap-3"
-          style={{ borderTop: '1px solid rgba(148,163,184,0.08)' }}
-        >
-          <span className="text-sm" style={{ color: '#94A3B8' }}>
-            Connect{' '}
-            <span style={{ color: '#A5B4FC', fontWeight: 600 }}>
-              {sourceLabels[sourceType] ?? sourceType}
-            </span>
-          </span>
-
-          <button
-            onClick={connect}
-            disabled={status === 'loading'}
-            className="px-4 py-1.5 rounded-lg text-sm font-semibold transition-all duration-150"
-            style={
-              status === 'done'
-                ? { background: 'rgba(16,185,129,0.12)', color: '#34D399', border: '1px solid rgba(16,185,129,0.25)' }
-                : status === 'error'
-                ? { background: 'rgba(239,68,68,0.12)', color: '#F87171', border: '1px solid rgba(239,68,68,0.25)' }
-                : {
-                    background: 'linear-gradient(135deg, #6366F1, #8B5CF6)',
-                    color: 'white',
-                    border: 'none',
-                    opacity: status === 'loading' ? 0.6 : 1,
-                  }
-            }
-          >
-            {status === 'loading'
-              ? 'Connecting…'
-              : status === 'done'
-              ? '✓ Connected!'
-              : 'Connect'}
-          </button>
-
-          {status === 'done' && (
-            <CheckCircle size={16} style={{ color: '#10B981' }} />
-          )}
-          {status === 'error' && (
-            <span className="flex items-center gap-1.5 text-xs" style={{ color: '#F87171' }}>
-              <XCircle size={14} />
-              {errorMsg}
-            </span>
-          )}
-        </div>
-      )}
+        );
+      })}
     </div>
   );
 }

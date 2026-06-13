@@ -1,0 +1,36 @@
+{
+  "family": "dataautomated-frontend",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "256",
+  "memory": "512",
+  "executionRoleArn": "arn:aws:iam::456788081187:role/dataautomated-ecs-execution",
+  "containerDefinitions": [
+    {
+      "name": "frontend",
+      "image": "456788081187.dkr.ecr.ap-southeast-2.amazonaws.com/dataautomated-frontend:latest",
+      "essential": true,
+      "portMappings": [
+        { "containerPort": 3000, "protocol": "tcp" }
+      ],
+      "environment": [
+        { "name": "NODE_ENV", "value": "production" }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/dataautomated-frontend",
+          "awslogs-region": "ap-southeast-2",
+          "awslogs-stream-prefix": "ecs"
+        }
+      },
+      "healthCheck": {
+        "command": ["CMD-SHELL", "curl -f http://localhost:3000/ || exit 1"],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 60
+      }
+    }
+  ]
+}

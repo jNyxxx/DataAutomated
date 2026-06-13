@@ -3,7 +3,9 @@ Competitive Signals router (CLAUDE.md §10; prefix `/signals`, tag `Competitive 
 
 Routes:
   POST /signals/analyze                       — dispatch Competitive Signal agent (async)
-  GET  /signals/latest                        — latest competitive_signals rows
+  GET  /signals/latest                        — paginated competitive_signals rows
+  GET  /signals/{signal_id}                   — single signal by ID
+  PATCH /signals/{signal_id}/read             — mark a signal as read
   POST /api/agents/competitive-signal/run     — n8n alias for /signals/analyze
 """
 
@@ -13,13 +15,14 @@ import logging
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Header
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query
 
 from app.config import settings
 from app.database import acquire_for_client
 from app.routers.auth import (
     CurrentUser,
     get_current_user,
+    require_role,
     resolve_service_client,
     verify_n8n_secret,
 )
@@ -57,26 +60,36 @@ async def _dispatch_comp_signal(
 @router.post("/analyze", status_code=202, summary="Trigger Competitive Signal analysis (async)")
 async def analyze(
     background_tasks: BackgroundTasks,
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_role("admin", "analyst")),
 ):
     return await _dispatch_comp_signal(background_tasks, current_user.client_id)
 
 
 @router.get("/latest", summary="Latest competitive signals for the caller's client")
-async def latest(current_user: CurrentUser = Depends(get_current_user)):
+async def latest(
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    current_user: CurrentUser = Depends(get_current_user),
+):
     """
-    Returns the 20 most recent competitive_signals rows for the caller's client.
+    Returns paginated competitive_signals rows for the caller's client.
     acquire_for_client sets RLS context; explicit WHERE provides belt-and-suspenders
     isolation per CLAUDE.md §6.
     """
     async with acquire_for_client(current_user.client_id) as conn:
+        total = await conn.fetchval(
+            "SELECT COUNT(*) FROM competitive_signals WHERE client_id = $1",
+            current_user.client_id,
+        )
         rows = await conn.fetch(
             "SELECT id, competitor_name, signal_type, signal_source, "
             "       strategic_context, urgency, detected_at, is_read "
             "FROM competitive_signals "
             "WHERE client_id = $1 "
-            "ORDER BY detected_at DESC LIMIT 20",
+            "ORDER BY detected_at DESC LIMIT $2 OFFSET $3",
             current_user.client_id,
+            limit,
+            offset,
         )
     return {
         "signals": [
@@ -86,8 +99,61 @@ async def latest(current_user: CurrentUser = Depends(get_current_user)):
                 "is_read": bool(r["is_read"]),
             }
             for r in rows
-        ]
+        ],
+        "total": total,
     }
+
+
+@router.get("/{signal_id}", summary="Single competitive signal by ID")
+async def get_signal(
+    signal_id: str,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    import uuid as _uuid
+    try:
+        signal_uuid = _uuid.UUID(signal_id)
+    except (ValueError, AttributeError):
+        raise HTTPException(status_code=404, detail="Signal not found.")
+    async with acquire_for_client(current_user.client_id) as conn:
+        row = await conn.fetchrow(
+            "SELECT id, competitor_name, signal_type, signal_source, "
+            "       strategic_context, urgency, detected_at, is_read "
+            "FROM competitive_signals "
+            "WHERE id = $1 AND client_id = $2",
+            signal_uuid,
+            current_user.client_id,
+        )
+    if not row:
+        raise HTTPException(status_code=404, detail="Signal not found.")
+    return {
+        "signal": {
+            **{k: str(v) if v is not None and k != "is_read" else v
+               for k, v in dict(row).items()},
+            "is_read": bool(row["is_read"]),
+        }
+    }
+
+
+@router.patch("/{signal_id}/read", summary="Mark a competitive signal as read")
+async def mark_signal_read(
+    signal_id: str,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    import uuid as _uuid
+    try:
+        signal_uuid = _uuid.UUID(signal_id)
+    except (ValueError, AttributeError):
+        raise HTTPException(status_code=404, detail="Signal not found.")
+    async with acquire_for_client(current_user.client_id) as conn:
+        result = await conn.execute(
+            "UPDATE competitive_signals SET is_read = TRUE "
+            "WHERE id = $1 AND client_id = $2",
+            signal_uuid,
+            current_user.client_id,
+        )
+    if result == "UPDATE 0":
+        raise HTTPException(status_code=404, detail="Signal not found.")
+    return {"status": "ok"}
 
 
 @_extra.get(
