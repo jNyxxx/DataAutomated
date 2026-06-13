@@ -1,19 +1,15 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
+import { useToast } from '@/components/ui/Toast';
 
 // EventSource URL must be browser-reachable; only the short-lived ticket (not
 // the JWT) appears here — acceptable per CLAUDE.md §14 P2.8.
 const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
-interface Toast {
-  id: number;
-  message: string;
-}
-
 export default function SseWatcher() {
-  const [toasts, setToasts] = useState<Toast[]>([]);
+  const { toast } = useToast();
   const router = useRouter();
   const mountedRef = useRef(true);
 
@@ -59,9 +55,7 @@ export default function SseWatcher() {
                 ? `New insight: ${payload.narrative.slice(0, 80)}…`
                 : 'New insight available';
             }
-            const id = Date.now();
-            setToasts((prev) => [...prev, { id, message: msg }]);
-            setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 6000);
+            toast(msg, 'info');
             router.refresh();
           } catch {
             // ignore parse errors
@@ -90,20 +84,7 @@ export default function SseWatcher() {
       clearTimeout(retryTimer);
       es?.close();
     };
-  }, [router]);
+  }, [router, toast]);
 
-  if (toasts.length === 0) return null;
-
-  return (
-    <div className="fixed bottom-4 right-4 flex flex-col gap-2 z-50">
-      {toasts.map((t) => (
-        <div
-          key={t.id}
-          className="bg-indigo-600 text-white text-sm px-4 py-3 rounded shadow-lg max-w-sm"
-        >
-          {t.message}
-        </div>
-      ))}
-    </div>
-  );
+  return null;
 }

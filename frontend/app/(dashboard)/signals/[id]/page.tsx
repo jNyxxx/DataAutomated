@@ -1,64 +1,104 @@
-import { cookies } from 'next/headers';
-import Link from 'next/link';
-import { fetchSignalById } from '@/lib/api';
-import UrgencyBadge from '@/components/urgency-badge';
-import MarkSignalRead from '@/components/mark-signal-read';
+import { cookies } from "next/headers";
+import Link from "next/link";
+import { Badge, type BadgeProps } from "@/components/ui/Badge";
+import MarkSignalRead from "@/components/mark-signal-read";
+
+interface BackendSignal {
+  id: string;
+  competitor_name: string | null;
+  signal_type: string | null;
+  signal_source: string | null;
+  raw_content: string | null;
+  strategic_context: string | null;
+  urgency: string | null;
+  detected_at: string | null;
+  is_read: boolean;
+}
 
 interface PageProps {
   params: Promise<{ id: string }>;
 }
 
+const URGENCY_BADGE: Record<string, { label: string; variant: BadgeProps["variant"] }> = {
+  critical: { label: "Critical", variant: "critical" },
+  high:     { label: "High", variant: "high" },
+  medium:   { label: "Medium", variant: "warning" },
+  med:      { label: "Medium", variant: "warning" },
+  low:      { label: "Low", variant: "neutral" },
+};
+
+async function fetchSignal(id: string): Promise<{ signal: BackendSignal | null }> {
+  const cookieStore = await cookies();
+  const token = cookieStore.get("token")?.value;
+  const base =
+    process.env.API_URL_INTERNAL ?? process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+
+  try {
+    const res = await fetch(`${base}/signals/${id}`, {
+      cache: "no-store",
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) return { signal: null };
+    return res.json() as Promise<{ signal: BackendSignal | null }>;
+  } catch {
+    return { signal: null };
+  }
+}
+
 export default async function SignalDetailPage({ params }: PageProps) {
   const { id } = await params;
-  const cookieStore = await cookies();
-  const token = cookieStore.get('token')?.value ?? '';
-  const res = await fetchSignalById(token, id).catch(() => null);
-  const signal = res?.signal ?? null;
+  const { signal } = await fetchSignal(id);
 
   if (!signal) {
     return (
       <div className="p-6">
-        <Link href="/signals" className="text-sm text-indigo-400 hover:underline">&larr; Signals</Link>
-        <p className="mt-4 text-sm" style={{ color: '#475569' }}>Signal not found.</p>
+        <Link href="/signals" className="text-sm text-blue-400 hover:underline">
+          ← Competitive Signals
+        </Link>
+        <p className="mt-4 text-sm text-slate-400">Signal not found.</p>
       </div>
     );
   }
 
-  return (
-    <div className="p-6 space-y-5 max-w-3xl">
-      <MarkSignalRead signalId={id} />
-      <Link href="/signals" className="text-sm text-indigo-400 hover:underline">&larr; Signals</Link>
+  const badge = URGENCY_BADGE[signal.urgency ?? "low"] ?? URGENCY_BADGE.low;
 
-      <div className="flex items-center gap-3">
-        <h1 className="text-xl font-semibold" style={{ color: '#F1F5F9' }}>
-          {signal.competitor_name ?? '—'} — {signal.signal_type ?? '—'}
+  return (
+    <div className="mx-auto max-w-3xl px-4 py-6 sm:px-6">
+      <MarkSignalRead signalId={id} />
+      <Link href="/signals" className="text-sm text-blue-400 hover:underline">
+        ← Competitive Signals
+      </Link>
+
+      <div className="mt-4 flex flex-wrap items-center gap-3">
+        <h1 className="text-xl font-semibold text-white">
+          {signal.competitor_name ?? "Unknown"} — {signal.signal_type ?? "Signal"}
         </h1>
-        <UrgencyBadge urgency={signal.urgency} />
+        <Badge variant={badge.variant} dot>{badge.label}</Badge>
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="mt-5 grid grid-cols-2 gap-4">
         {[
-          { label: 'Source', value: signal.signal_source },
-          { label: 'Detected', value: signal.detected_at?.slice(0, 10) },
+          { label: "Source", value: signal.signal_source },
+          { label: "Detected", value: signal.detected_at?.slice(0, 10) },
         ].map(({ label, value }) => (
-          <div
-            key={label}
-            className="rounded-lg p-4"
-            style={{ background: '#151E35', border: '1px solid rgba(148,163,184,0.09)' }}
-          >
-            <div className="text-xs mb-1" style={{ color: '#475569' }}>{label}</div>
-            <div className="text-sm font-medium" style={{ color: '#E2E8F0' }}>{value ?? '—'}</div>
+          <div key={label} className="rounded-xl bg-slate-800 p-4 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.05)]">
+            <div className="mb-1 text-xs text-slate-400">{label}</div>
+            <div className="text-sm font-medium text-slate-200">{value ?? "—"}</div>
           </div>
         ))}
       </div>
 
+      {signal.raw_content && (
+        <div className="mt-5 rounded-xl bg-slate-800 p-5 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.05)]">
+          <h2 className="mb-2 text-sm font-semibold text-white">Raw signal</h2>
+          <p className="text-sm leading-relaxed text-slate-300">{signal.raw_content}</p>
+        </div>
+      )}
+
       {signal.strategic_context && (
-        <div
-          className="rounded-xl p-5"
-          style={{ background: '#151E35', border: '1px solid rgba(148,163,184,0.09)' }}
-        >
-          <h2 className="text-sm font-medium mb-2" style={{ color: '#94A3B8' }}>Strategic Context</h2>
-          <p className="text-sm leading-relaxed" style={{ color: '#CBD5E1' }}>{signal.strategic_context}</p>
+        <div className="mt-5 rounded-xl bg-slate-800 p-5 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.05)]">
+          <h2 className="mb-2 text-sm font-semibold text-white">Strategic context</h2>
+          <p className="text-sm leading-relaxed text-slate-300">{signal.strategic_context}</p>
         </div>
       )}
     </div>
