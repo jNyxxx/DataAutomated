@@ -46,6 +46,7 @@ from app.database import acquire_for_client
 from app.services.audit_service import record_audit
 from app.services.embedding_service import retrieve_similar
 from app.services.llm_json import loads_tolerant
+from app.services.trace_redaction import get_redacting_client
 from app.tools.registry import get_tools_for_client
 
 logger = logging.getLogger("dataautomated")
@@ -422,7 +423,7 @@ def _build_comp_signal_graph(llm: Any):
 # Public entry point
 # ---------------------------------------------------------------------------
 
-@traceable(name="comp_signal_agent")
+@traceable(name="comp_signal_agent", client=get_redacting_client())
 async def run_comp_signal_analysis(client_id: UUID) -> None:
     """
     Run the full Competitive Signal pipeline for one client.

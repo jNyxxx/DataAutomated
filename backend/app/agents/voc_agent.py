@@ -35,6 +35,7 @@ from app.database import acquire_for_client
 from app.services.audit_service import record_audit
 from app.services.embedding_service import retrieve_similar
 from app.services.nlp_service import NLPResult, extract_feedback_batch
+from app.services.trace_redaction import get_redacting_client
 
 logger = logging.getLogger("dataautomated")
 
@@ -403,7 +404,7 @@ def _build_voc_graph(llm: Any):
 # Public entry point
 # ---------------------------------------------------------------------------
 
-@traceable(name="voc_agent")
+@traceable(name="voc_agent", client=get_redacting_client())
 async def run_voc_analysis(client_id: UUID) -> None:
     """
     Run the full VoC analysis pipeline for one client.

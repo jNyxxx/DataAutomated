@@ -45,6 +45,7 @@ from app.database import acquire_for_client
 from app.services.audit_service import record_audit
 from app.services.embedding_service import retrieve_similar
 from app.services.llm_json import loads_tolerant
+from app.services.trace_redaction import get_redacting_client
 
 logger = logging.getLogger("dataautomated")
 
@@ -420,7 +421,7 @@ def _build_journey_graph(llm: Any):
 # Public entry point
 # ---------------------------------------------------------------------------
 
-@traceable(name="journey_agent")
+@traceable(name="journey_agent", client=get_redacting_client())
 async def run_journey_analysis(client_id: UUID) -> None:
     """
     Run the full Behavioral Journey pipeline for one client.

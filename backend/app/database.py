@@ -37,8 +37,8 @@ async def init_pool(dsn: Optional[str] = None) -> None:
     global pool
     pool = await asyncpg.create_pool(
         dsn or settings.database_dsn,
-        min_size=2,
-        max_size=10,
+        min_size=settings.db_pool_min_size,
+        max_size=settings.db_pool_max_size,
     )
 
 

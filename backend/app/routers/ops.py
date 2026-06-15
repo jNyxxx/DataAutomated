@@ -97,6 +97,29 @@ async def clients_with_competitive_monitoring(
     }
 
 
+@router.post("/api/clients/me/erase", summary="Erase the caller's own tenant (GDPR right to erasure)")
+async def erase_my_client(
+    payload: dict[str, Any],
+    current_user: CurrentUser = Depends(require_role("admin")),
+):
+    """
+    GDPR right-to-erasure (SR-04). Admin-only and SELF-TENANT ONLY — operates on
+    current_user.client_id, with no client_id path parameter, so no tenant can erase
+    another (§6). Irreversible: requires {"confirm": "ERASE"} in the body. Personal
+    data is deleted and the tenant shell + audit trail are anonymised; the caller's
+    session becomes invalid once their user row is removed.
+    """
+    if payload.get("confirm") != "ERASE":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail='Confirmation required: send {"confirm": "ERASE"}.',
+        )
+    from app.services.gdpr_service import erase_client
+
+    counts = await erase_client(current_user.client_id, requested_by=str(current_user.id))
+    return {"status": "erased", "deleted": counts}
+
+
 @router.get("/api/dashboard/summary")
 async def dashboard_summary(current_user: CurrentUser = Depends(get_current_user)):
     """

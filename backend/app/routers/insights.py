@@ -18,13 +18,14 @@ import asyncio
 import json
 import logging
 import secrets as _secrets
-import time
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
+import app.database as _db
 from app.config import settings
 from app.database import acquire_for_client
 from app.routers.auth import (
@@ -46,11 +47,10 @@ _extra = APIRouter(tags=["VoC Insights"])
 # ---------------------------------------------------------------------------
 # SSE ticket store — short-lived single-use tokens so the long-lived JWT
 # never appears in server access logs (CLAUDE.md §14 / §12 security note).
-# In-memory dict is fine for a single-process deployment; for multi-replica
-# ECS (2+ tasks without sticky sessions) replace with a DB-backed or Redis
-# ticket store. TTL: 60 s — enough for a page load to open the EventSource.
+# SR-02: stored in Postgres (sse_tickets), not process memory, so a ticket
+# issued on one ECS task is redeemable on any task (no sticky sessions needed).
+# TTL: 60 s — enough for a page load to open the EventSource.
 # ---------------------------------------------------------------------------
-_SSE_TICKETS: dict[str, tuple[UUID, float]] = {}  # ticket → (client_id, expiry_monotonic)
 _SSE_TICKET_TTL = 60
 
 
@@ -226,8 +226,16 @@ async def issue_sse_ticket(current_user: CurrentUser = Depends(get_current_user)
     open EventSource using the returned ticket as a query param instead of the
     raw JWT — prevents the long-lived token from appearing in access logs (§14).
     """
+    if _db.pool is None:
+        raise HTTPException(status_code=503, detail="Database unavailable.")
     ticket = _secrets.token_urlsafe(32)
-    _SSE_TICKETS[ticket] = (current_user.client_id, time.monotonic() + _SSE_TICKET_TTL)
+    expires_at = datetime.now(timezone.utc) + timedelta(seconds=_SSE_TICKET_TTL)
+    async with _db.pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO sse_tickets (ticket, client_id, user_id, expires_at) "
+            "VALUES ($1, $2, $3, $4)",
+            ticket, current_user.client_id, current_user.id, expires_at,
+        )
     return {"ticket": ticket, "expires_in": _SSE_TICKET_TTL}
 
 
@@ -246,10 +254,17 @@ async def stream_insights(
     a secure HttpOnly cookie is the ideal long-term approach.
     """
     if ticket is not None:
-        entry = _SSE_TICKETS.pop(ticket, None)
-        if entry is None or time.monotonic() > entry[1]:
+        if _db.pool is None:
+            raise HTTPException(status_code=503, detail="Database unavailable.")
+        # Single-use: DELETE … RETURNING atomically consumes the ticket.
+        async with _db.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "DELETE FROM sse_tickets WHERE ticket = $1 RETURNING client_id, expires_at",
+                ticket,
+            )
+        if row is None or row["expires_at"] < datetime.now(timezone.utc):
             raise HTTPException(status_code=401, detail="SSE ticket invalid or expired.")
-        client_id = entry[0]
+        client_id = row["client_id"]
     elif token is not None:
         current_user = await get_current_user(token)
         client_id = current_user.client_id

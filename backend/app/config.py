@@ -35,10 +35,23 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://dataautomated:change_me_locally@db:5432/dataautomated"
     database_dsn: str = "postgresql://dataautomated:change_me_locally@db:5432/dataautomated"
 
+    # ---- Connection pool sizing (LB-07) ----
+    # Connection budget: db_pool_max_size × uvicorn_workers × ecs_tasks ≤ RDS max_connections.
+    # Tune via env per the budget table in DEPLOYMENT.md before scaling task count.
+    db_pool_min_size: int = 2
+    db_pool_max_size: int = 10
+
     # ---- Auth (D1 default: custom JWT; MULTI_TENANT_SECURITY.md §5) ----
     jwt_secret_key: str = "replace_me"
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 60
+
+    # ---- Auth hardening (P3-02 lockout + password policy) ----
+    # Account lockout uses the shared login_attempts table (cross-instance, no Redis).
+    login_max_failed_attempts: int = 5
+    login_lockout_window_seconds: int = 900      # 15 min sliding window to trip the lock
+    login_lockout_duration_seconds: int = 900    # 15 min lock once tripped
+    password_min_length: int = 12
 
     # ---- App-layer credential encryption (SR-04 / AUD-12) ----
     credential_encryption_key: str = "replace_me"
@@ -105,6 +118,20 @@ class Settings(BaseSettings):
 
         if self.openai_api_key in _PLACEHOLDER_VALUES:
             errors.append("OPENAI_API_KEY is blank — agents will fail in production.")
+
+        # LB-06/LB-10: host validation must be explicit in production — a wildcard or
+        # empty allow-list disables TrustedHostMiddleware (main.py) and accepts any Host.
+        if self.allowed_hosts == ["*"] or not self.allowed_hosts:
+            errors.append(
+                "ALLOWED_HOSTS is wildcard/empty — set an explicit host allow-list in production."
+            )
+
+        # SR-07/P4-02: CORS must be explicit in production — '*' with allow_credentials=True
+        # is both unsafe and rejected by browsers; fail closed rather than ship it.
+        if "*" in self.cors_origins:
+            errors.append(
+                "CORS_ORIGINS contains '*' — set explicit allowed origins in production."
+            )
 
         if errors:
             raise ValueError(
