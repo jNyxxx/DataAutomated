@@ -217,3 +217,27 @@ All three agents are decorated with `@traceable` and send traces to LangSmith.
 5. A failed run shows the failing node; expand to see the error and the LLM call that caused it
 
 **Alert threshold:** 0 failed runs in 48 h (CLAUDE.md §16 QA exit bar). If any run fails, investigate and fix before shipping new features.
+
+**Trace privacy (SR-03):** agent traces are redacted before leaving the process
+(`backend/app/services/trace_redaction.py`) — emails/phones are masked and credential-like
+keys removed. Tracing stays ON in every environment (CLAUDE.md §2); we redact, we do not disable.
+
+---
+
+## 9. Launch-audit remediation operations
+
+The June 2026 security/launch remediation (`SECURITY_REMEDIATION.md`) introduced controls
+whose production cutovers are operational steps. The deterministic procedures live in
+**`SECURITY_REMEDIATION.md` §5**; in summary:
+
+- **M1 — non-superuser pool role:** set `app_login`'s password from Secrets Manager, point
+  `DATABASE_DSN`/`DATABASE_URL` at it, redeploy. Makes RLS the default even on raw checkouts.
+- **Connection budget (LB-07):** `db_pool_max_size × workers × tasks ≤ RDS max_connections`
+  before raising task count. Pool sizing is env-tunable (`DB_POOL_MIN_SIZE`/`DB_POOL_MAX_SIZE`).
+- **Distributed rate limiting (SR-06/P4-03):** enforce at AWS WAF on the ALB (the in-process
+  limiter is per-task). Suggested rules in `SECURITY_REMEDIATION.md` §5.
+- **n8n Slack credential (LB-04/08):** deploy `.github/ecs/n8n-task-definition.json`
+  (EFS-backed), create the `DataAutomated Slack` credential from `SLACK_BOT_TOKEN`, import +
+  activate workflows. `N8N_ENCRYPTION_KEY` must match the value in the EFS volume.
+- **Account lockout / token revocation:** `login_attempts` and `token_denylist` are pruned
+  by `expires_at` — schedule a periodic cleanup (`DELETE … WHERE expires_at < NOW()`).
