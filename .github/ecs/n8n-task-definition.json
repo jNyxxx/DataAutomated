@@ -1,0 +1,63 @@
+{
+  "family": "dataautomated-n8n",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "512",
+  "memory": "1024",
+  "executionRoleArn": "arn:aws:iam::456788081187:role/dataautomated-ecs-execution",
+  "volumes": [
+    {
+      "name": "n8n-data",
+      "efsVolumeConfiguration": {
+        "fileSystemId": "fs-0d2ce15e84488c74f",
+        "rootDirectory": "/",
+        "transitEncryption": "ENABLED",
+        "authorizationConfig": {
+          "accessPointId": "fsap-0a0a20f4867b6d9ce",
+          "iam": "DISABLED"
+        }
+      }
+    }
+  ],
+  "containerDefinitions": [
+    {
+      "name": "n8n",
+      "image": "n8nio/n8n:latest",
+      "cpu": 0,
+      "essential": true,
+      "portMappings": [
+        { "containerPort": 5678, "hostPort": 5678, "protocol": "tcp" }
+      ],
+      "environment": [
+        { "name": "WEBHOOK_URL", "value": "http://dataautomated-alb-1029620184.ap-southeast-2.elb.amazonaws.com:5678/" },
+        { "name": "N8N_BASIC_AUTH_USER", "value": "admin" },
+        { "name": "N8N_BASIC_AUTH_ACTIVE", "value": "true" },
+        { "name": "BACKEND_URL", "value": "http://backend.dataautomated.local:8000" },
+        { "name": "N8N_HOST", "value": "dataautomated-alb-1029620184.ap-southeast-2.elb.amazonaws.com" },
+        { "name": "N8N_PORT", "value": "5678" },
+        { "name": "N8N_BLOCK_ENV_ACCESS_IN_NODE", "value": "false" },
+        { "name": "N8N_ENV_VARS_ALLOW_ALL", "value": "true" },
+        { "name": "N8N_SECURE_COOKIE", "value": "false" },
+        { "name": "N8N_PROTOCOL", "value": "http" }
+      ],
+      "mountPoints": [
+        { "sourceVolume": "n8n-data", "containerPath": "/home/node/.n8n" }
+      ],
+      "secrets": [
+        { "name": "N8N_ENCRYPTION_KEY", "valueFrom": "arn:aws:secretsmanager:ap-southeast-2:456788081187:secret:dataautomated/prod/n8n-mtNYNN:N8N_ENCRYPTION_KEY::" },
+        { "name": "N8N_BASIC_AUTH_PASSWORD", "valueFrom": "arn:aws:secretsmanager:ap-southeast-2:456788081187:secret:dataautomated/prod/n8n-mtNYNN:N8N_BASIC_AUTH_PASSWORD::" },
+        { "name": "N8N_WEBHOOK_SECRET", "valueFrom": "arn:aws:secretsmanager:ap-southeast-2:456788081187:secret:dataautomated/prod/n8n-mtNYNN:N8N_WEBHOOK_SECRET::" },
+        { "name": "RESEND_API_KEY", "valueFrom": "arn:aws:secretsmanager:ap-southeast-2:456788081187:secret:dataautomated/prod/n8n-mtNYNN:RESEND_API_KEY::" },
+        { "name": "SLACK_BOT_TOKEN", "valueFrom": "arn:aws:secretsmanager:ap-southeast-2:456788081187:secret:dataautomated/prod/n8n-mtNYNN:SLACK_BOT_TOKEN::" }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/dataautomated-n8n",
+          "awslogs-region": "ap-southeast-2",
+          "awslogs-stream-prefix": "ecs"
+        }
+      }
+    }
+  ]
+}

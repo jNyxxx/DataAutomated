@@ -72,7 +72,7 @@
       "onError": "continueRegularOutput",
       "credentials": {
         "slackApi": {
-          "id": "slack-credential-id",
+          "id": "dataautomated-slack-prod",
           "name": "DataAutomated Slack"
         }
       }

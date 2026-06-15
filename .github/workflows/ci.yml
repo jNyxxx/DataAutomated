@@ -88,6 +88,21 @@ jobs:
       - name: ESLint
         run: npx next lint
 
+  frontend-tests:
+    name: Frontend unit tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install
+      - name: Vitest (SR-05)
+        run: npm test
+
   frontend-build:
     name: Frontend build
     runs-on: ubuntu-latest
@@ -119,9 +134,25 @@ jobs:
           pip install -r backend/requirements.txt
           pip-audit -r backend/requirements.txt --min-severity high
 
+  sast:
+    name: Static analysis (Bandit)
+    # P4-04: SAST to complement the dependency scans above. CodeQL (Python + JS)
+    # runs in its own workflow (.github/workflows/codeql.yml).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Bandit (backend)
+        run: |
+          pip install bandit
+          # Fail the build only on medium+ severity / medium+ confidence findings.
+          bandit -r backend/app -ll -ii
+
   deploy:
     name: Build, push ECR & deploy ECS
-    needs: [backend-tests, frontend-lint, frontend-build, dependency-scan]
+    needs: [backend-tests, frontend-lint, frontend-tests, frontend-build, dependency-scan, sast]
     # Only deploy on pushes to main — not on PRs.
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
@@ -185,9 +216,17 @@ jobs:
 
       - name: Run database migrations
         run: |
+          # LB-02: register the just-built backend task definition (the SHA image
+          # rendered above) and run migrations against THAT revision — never the
+          # stale 'dataautomated-backend' family default, which points at the
+          # previously-deployed image and can run migrations on old app code.
+          MIGRATION_TASK_DEF_ARN=$(aws ecs register-task-definition \
+            --cli-input-json file://${{ steps.render-backend.outputs.task-definition }} \
+            --query 'taskDefinition.taskDefinitionArn' --output text)
+          echo "Running migrations on task def: $MIGRATION_TASK_DEF_ARN"
           aws ecs run-task \
             --cluster $CLUSTER \
-            --task-definition dataautomated-backend \
+            --task-definition "$MIGRATION_TASK_DEF_ARN" \
             --launch-type FARGATE \
             --network-configuration '${{ vars.ECS_NETWORK_CONFIG }}' \
             --overrides '{"containerOverrides":[{"name":"backend","command":["alembic","upgrade","head"]}]}' \
