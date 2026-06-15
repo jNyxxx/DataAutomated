@@ -18,7 +18,9 @@ Implements the canonical schema from CLAUDE.md §5 / DATABASE_FOUNDATION.md §3 
     Extended:   data_sources, reports, knowledge_embeddings
                 (committed default per MULTI_TENANT_SECURITY §3 "adopt")
     Policy:     current_setting('app.current_client_id', TRUE)::UUID
-                (missing_ok=TRUE → NULL when not set → fail closed, no error)
+                Fail-closed two ways (L6): unset → NULL → no rows match (no error); a
+                prior session that left the GUC = '' makes ''::UUID raise
+                InvalidTextRepresentationError. Either outcome denies access.
 
 Downgrade: drops all policies, disables RLS, revokes local app_runtime privileges,
 drops tables in safe FK order. Extensions and app_runtime are intentionally NOT dropped
@@ -295,8 +297,9 @@ def upgrade() -> None:
     # 7. Row-Level Security
     #
     #    Policy: client_id = current_setting('app.current_client_id', TRUE)::UUID
-    #    missing_ok=TRUE: if setting absent → NULL → client_id = NULL → FALSE for
-    #    all rows → fail closed (no error, no data leaked).
+    #    Fail-closed two ways (L6): if the setting is absent → NULL → client_id = NULL
+    #    → FALSE for all rows (no error). If a prior session left the GUC = '', then
+    #    ''::UUID raises InvalidTextRepresentationError. Either way access is denied.
     #
     #    FORCE ROW LEVEL SECURITY: applied as defense-in-depth so even the table
     #    owner cannot accidentally bypass policies.  Superusers still bypass RLS
