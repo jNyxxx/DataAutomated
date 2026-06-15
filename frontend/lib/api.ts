@@ -15,11 +15,21 @@ import type {
   PaginationParams,
 } from './types';
 
-function getBaseUrl(serverSide = false): string {
+export function getBaseUrl(serverSide = false): string {
   if (serverSide && process.env.API_URL_INTERNAL) {
     return process.env.API_URL_INTERNAL;
   }
-  return process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
+  const url = process.env.NEXT_PUBLIC_API_URL;
+  if (url) return url;
+  // LB-05/09: never silently fall back to localhost in production. A build or deploy
+  // shipped without NEXT_PUBLIC_API_URL would otherwise point real users at their own
+  // machine. Fail loudly instead; the Docker build also guards this at build time.
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error(
+      'NEXT_PUBLIC_API_URL is not set — refusing to fall back to localhost in production.',
+    );
+  }
+  return 'http://localhost:8000';
 }
 
 export async function apiRequest<T>(
