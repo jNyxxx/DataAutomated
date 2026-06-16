@@ -8,6 +8,7 @@ const isDev = process.env.NODE_ENV !== 'production';
 
 const csp = [
   "default-src 'self'",
+  "frame-src 'self' blob:",
   "base-uri 'self'",
   "form-action 'self'",
   "frame-ancestors 'none'",
@@ -34,7 +35,22 @@ const securityHeaders = [
 const nextConfig = {
   output: 'standalone',
   async headers() {
-    return [{ source: '/:path*', headers: securityHeaders }];
+    return [
+      { source: '/:path*', headers: securityHeaders },
+      {
+        // The report file endpoint is loaded in an iframe for the in-app preview.
+        // Override the site-wide frame-blocking headers to allow same-origin embedding.
+        // The report HTML is self-contained (inline styles, no scripts, no external resources).
+        source: '/api/reports/:id/file',
+        headers: [
+          { key: 'X-Frame-Options', value: 'SAMEORIGIN' },
+          {
+            key: 'Content-Security-Policy',
+            value: "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; frame-ancestors 'self'",
+          },
+        ],
+      },
+    ];
   },
 };
 

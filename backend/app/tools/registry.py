@@ -25,12 +25,16 @@ from uuid import UUID
 
 from app.database import acquire_for_client
 from app.tools.base_tool import DataAutomatedBaseTool
+from app.tools.ga4_tool import GA4EventsTool
+from app.tools.google_news_tool import GoogleNewsSignalTool
+from app.tools.hubspot_tool import HubSpotFeedbackTool
 from app.tools.intercom_tool import IntercomConversationsTool
 from app.tools.journey_tool import (
     MixpanelEventsTool,
     SegmentEventsTool,
     ShopifyEventsTool,
 )
+from app.tools.reddit_tool import RedditSignalTool
 from app.tools.scraper_tool import (
     CapterraReviewScraper,
     G2ReviewScraper,
@@ -49,16 +53,23 @@ logger = logging.getLogger("dataautomated")
 # ---------------------------------------------------------------------------
 
 TOOL_REGISTRY: dict[str, DataAutomatedBaseTool] = {
+    # VoC
     "zendesk":       ZendeskFeedbackTool(),
     "typeform":      TypeformResponseTool(),
     "intercom":      IntercomConversationsTool(),
+    "hubspot":       HubSpotFeedbackTool(),
+    # CompSig
     "news":          NewsSignalTool(),
     "g2":            G2ReviewScraper(),
     "capterra":      CapterraReviewScraper(),
     "linkedin_jobs": LinkedInJobsScraper(),
+    "reddit":        RedditSignalTool(),
+    "google_news":   GoogleNewsSignalTool(),
+    # Journey
     "mixpanel":      MixpanelEventsTool(),
     "segment":       SegmentEventsTool(),
     "shopify":       ShopifyEventsTool(),
+    "ga4":           GA4EventsTool(),
 }
 
 

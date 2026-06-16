@@ -1,21 +1,48 @@
 "use client";
 
 import * as React from "react";
-import { Download } from "lucide-react";
+import { Download, Play } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { exportVocAction } from "@/app/(dashboard)/insights/actions";
-import { addToast } from "@/components/ui/Toast";
+import { exportVocAction, triggerVoCAnalysisAction } from "@/app/(dashboard)/insights/actions";
+import { useToast } from "@/components/ui/Toast";
+
+export function AnalyzeButton({ canTrigger = true }: { canTrigger?: boolean }) {
+  const { toast } = useToast();
+  const [loading, setLoading] = React.useState(false);
+
+  if (!canTrigger) return null;
+
+  const onClick = async () => {
+    setLoading(true);
+    try {
+      await triggerVoCAnalysisAction();
+      toast("VoC analysis queued — refresh in ~60s to see results.", "success");
+    } catch {
+      toast("Failed to queue analysis", "error");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <Button variant="primary" onClick={onClick} disabled={loading}>
+      <Play className="mr-2 size-4" />
+      {loading ? "Queuing..." : "Run Analysis"}
+    </Button>
+  );
+}
 
 export function ExportVocButton() {
+  const { toast } = useToast();
   const [loading, setLoading] = React.useState(false);
 
   const onClick = async () => {
     setLoading(true);
     try {
       const result = await exportVocAction();
-      addToast(result.message, "success");
+      toast(result.message, "success");
     } catch {
-      addToast("Failed to start VoC export", "error");
+      toast("Failed to start VoC export", "error");
     } finally {
       setLoading(false);
     }

@@ -1,19 +1,24 @@
-import { getTokenServerSide } from '@/lib/auth';
-import { fetchInsights } from '@/lib/api';
+import Link from 'next/link';
+import { getTokenServerSide, getUserRoleFromToken } from '@/lib/auth';
+import { fetchInsights, fetchFeedbackSamples, fetchClientInfo } from '@/lib/api';
 import { Header } from '@/components/layout/Header';
 import { Sparkline, Donut, Gauge } from '@/components/ui/charts';
 import { Badge, BADGE_STYLES } from '@/components/ui/badge';
-import { SearchWell } from '@/components/ui/search-well';
-import { FilterWell } from '@/components/ui/filter-well';
-import { Button } from '@/components/ui/button';
-import { ExportVocButton } from '@/components/insights/VocActions';
+import { AnalyzeButton, ExportVocButton } from '@/components/insights/VocActions';
 
-const TINT = { voc: "#2dd4bf", comp: "#f43f5e", jrn: "#3b82f6", system: "#94a3b8" } as const;
+const TINT = { voc: "#2dd4bf" } as const;
 
 export default async function InsightsPage() {
   const token = getTokenServerSide()!;
-  const data = await fetchInsights(token, { limit: 20 }).catch(() => ({ insights: [], total: 0 }));
+  const role = getUserRoleFromToken(token);
+  const canTrigger = role !== 'viewer';
+  const [data, samplesData, clientInfo] = await Promise.all([
+    fetchInsights(token, { limit: 20 }).catch(() => ({ insights: [], total: 0 })),
+    fetchFeedbackSamples(token, { limit: 10 }).catch(() => ({ samples: [] })),
+    fetchClientInfo(token).catch(() => ({ name: "Your account", plan: "insight_starter", email: "" })),
+  ]);
   const latestInsight = data.insights[0];
+  const prevInsight = data.insights[1];
 
   let parsedThemes: [string, number, number, string][] = [];
   if (latestInsight?.themes) {
@@ -28,9 +33,9 @@ export default async function InsightsPage() {
         ]);
       } else {
         parsedThemes = Object.entries(t).map(([name, count]) => [
-          name, 
-          count as number, 
-          Math.min(100, (count as number) * 2), 
+          name,
+          count as number,
+          Math.min(100, (count as number) * 2),
           "med"
         ]);
       }
@@ -39,28 +44,59 @@ export default async function InsightsPage() {
     }
   }
 
+  // Compute sentiment mix from all loaded insights
+  const positiveCount = data.insights.filter(i => i.sentiment_label === 'positive').length;
+  const negativeCount = data.insights.filter(i => i.sentiment_label === 'negative').length;
+  const neutralCount = data.insights.filter(i => i.sentiment_label === 'neutral' || i.sentiment_label === 'mixed').length;
+  const sentimentTotal = Math.max(positiveCount + negativeCount + neutralCount, 1);
+  const posPct = Math.round((positiveCount / sentimentTotal) * 100);
+  const negPct = Math.round((negativeCount / sentimentTotal) * 100);
+  const neuPct = 100 - posPct - negPct;
+
+  // Sparkline from recent sentiment scores (oldest→newest)
+  const sentimentSparkline = data.insights
+    .map(i => i.sentiment_score ?? 0)
+    .reverse();
+
+  // Compute real deltas from last 2 insight rows
+  const sentimentDelta = latestInsight?.sentiment_score != null && prevInsight?.sentiment_score != null
+    ? (latestInsight.sentiment_score - prevInsight.sentiment_score)
+    : null;
+  const churnDelta = latestInsight?.churn_risk != null && prevInsight?.churn_risk != null
+    ? Math.round((latestInsight.churn_risk - prevInsight.churn_risk) * 100)
+    : null;
+
   const UB: Record<string, [string, keyof typeof BADGE_STYLES]> = { high: ["High", "high"], med: ["Medium", "warning"], low: ["Low", "neutral"] };
-  const SENT: Record<string, [string, keyof typeof BADGE_STYLES]> = { pos: ["Positive", "success"], neg: ["Negative", "critical"], neu: ["Neutral", "neutral"] };
 
   return (
     <div className="pb-12">
       <Header
         title="Voice of Customer"
-        description="Sentiment, themes & churn signals · Acme SaaS Inc."
+        description={`Sentiment, themes & churn signals · ${clientInfo.name}`}
+        actions={<AnalyzeButton canTrigger={canTrigger} />}
       />
-
-
 
       {/* AI Narrative */}
       <section className="mt-5 w-full rounded-xl bg-slate-800 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.05)] p-5 sm:p-6">
         <div className="mb-3 flex items-center gap-2 text-xs font-medium text-teal-400">✦ AI Executive Narrative</div>
-        <p className="max-w-4xl text-sm leading-relaxed text-slate-300">
-          {latestInsight?.narrative ? (
-            <span className="text-white">{latestInsight.narrative}</span>
-          ) : (
-            <span className="text-slate-500 italic">No narrative generated yet. Waiting for enough feedback signals...</span>
-          )}
-        </p>
+        {latestInsight?.narrative ? (
+          <p className="max-w-4xl text-sm leading-relaxed text-white">{latestInsight.narrative}</p>
+        ) : (
+          <div className="flex flex-col items-start gap-3 rounded-lg border border-dashed border-white/10 p-5">
+            <p className="text-sm text-slate-400">
+              No narrative generated yet — connect a feedback source and run your first VoC analysis.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <Link
+                href="/settings"
+                className="inline-flex h-8 items-center rounded-lg bg-slate-700 px-3 text-xs font-medium text-slate-200 hover:bg-slate-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+              >
+                Connect a source
+              </Link>
+              <AnalyzeButton canTrigger={canTrigger} />
+            </div>
+          </div>
+        )}
       </section>
 
       {/* Charts */}
@@ -71,10 +107,14 @@ export default async function InsightsPage() {
             <span className="shrink-0 text-xs text-slate-400">30d</span>
           </div>
           <div className="mb-1 flex items-baseline gap-2">
-            <span className="text-2xl font-semibold tabular-nums text-white">+{latestInsight?.sentiment_score ?? "0.42"}</span>
-            <span className="text-xs text-teal-400">▲ 0.08 vs prev</span>
+            <span className="text-2xl font-semibold tabular-nums text-white">{latestInsight?.sentiment_score ? `+${latestInsight.sentiment_score}` : "N/A"}</span>
+            {sentimentDelta !== null && (
+              <span className={`text-xs ${sentimentDelta >= 0 ? 'text-teal-400' : 'text-rose-400'}`}>
+                {sentimentDelta >= 0 ? '▲' : '▼'} {Math.abs(sentimentDelta).toFixed(2)} vs prev
+              </span>
+            )}
           </div>
-          <Sparkline points={[2, 3, 2, 4, 3, 5, 4, 6, 5, 7]} color={TINT.voc} height={72} />
+          <Sparkline points={sentimentSparkline} color={TINT.voc} height={72} />
         </section>
 
         <section className="rounded-xl bg-slate-800 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.05)] p-5">
@@ -83,13 +123,17 @@ export default async function InsightsPage() {
             <span className="shrink-0 text-xs text-slate-400">Growth cohort</span>
           </div>
           <div className="relative">
-            <Gauge value={latestInsight?.churn_risk ?? 0.18} color="#f59e0b" />
+            <Gauge value={latestInsight?.churn_risk ?? 0} color="#f59e0b" />
             <div className="pointer-events-none absolute inset-x-0 bottom-1 flex flex-col items-center">
-              <span className="text-2xl font-semibold tabular-nums text-white">{Math.round((latestInsight?.churn_risk ?? 0.18) * 100)}%</span>
+              <span className="text-2xl font-semibold tabular-nums text-white">{latestInsight?.churn_risk !== undefined && latestInsight.churn_risk !== null ? Math.round(latestInsight.churn_risk * 100) : "N/A"}%</span>
               <span className="text-xs text-slate-400">at-risk</span>
             </div>
           </div>
-          <p className="mt-2 text-center text-xs text-slate-400">▲ 4 pts vs last week</p>
+          {churnDelta !== null && (
+            <p className={`mt-2 text-center text-xs ${churnDelta >= 0 ? 'text-rose-400' : 'text-teal-400'}`}>
+              {churnDelta >= 0 ? '▲' : '▼'} {Math.abs(churnDelta)} pts vs prev period
+            </p>
+          )}
         </section>
 
         <section className="rounded-xl bg-slate-800 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.05)] p-5">
@@ -98,11 +142,11 @@ export default async function InsightsPage() {
             <span className="shrink-0 text-xs text-slate-400">all sources</span>
           </div>
           <div className="flex items-center gap-4">
-            <Donut segments={[{ v: 56, color: "#2dd4bf" }, { v: 26, color: "#f43f5e" }, { v: 18, color: "#64748b" }]} />
+            <Donut segments={[{ v: posPct, color: "#2dd4bf" }, { v: negPct, color: "#f43f5e" }, { v: neuPct, color: "#64748b" }]} />
             <ul className="min-w-0 flex-1 space-y-1.5 text-sm">
-              <li className="flex items-center justify-between gap-3"><span className="flex items-center gap-2 text-slate-300"><span className="size-2 rounded-full bg-teal-400"></span>Positive</span><span className="font-medium tabular-nums text-slate-200">56%</span></li>
-              <li className="flex items-center justify-between gap-3"><span className="flex items-center gap-2 text-slate-300"><span className="size-2 rounded-full bg-rose-400"></span>Negative</span><span className="font-medium tabular-nums text-slate-200">26%</span></li>
-              <li className="flex items-center justify-between gap-3"><span className="flex items-center gap-2 text-slate-300"><span className="size-2 rounded-full bg-slate-500"></span>Neutral</span><span className="font-medium tabular-nums text-slate-200">18%</span></li>
+              <li className="flex items-center justify-between gap-3"><span className="flex items-center gap-2 text-slate-300"><span className="size-2 rounded-full bg-teal-400"></span>Positive</span><span className="font-medium tabular-nums text-slate-200">{posPct}%</span></li>
+              <li className="flex items-center justify-between gap-3"><span className="flex items-center gap-2 text-slate-300"><span className="size-2 rounded-full bg-rose-400"></span>Negative</span><span className="font-medium tabular-nums text-slate-200">{negPct}%</span></li>
+              <li className="flex items-center justify-between gap-3"><span className="flex items-center gap-2 text-slate-300"><span className="size-2 rounded-full bg-slate-500"></span>Neutral</span><span className="font-medium tabular-nums text-slate-200">{neuPct}%</span></li>
             </ul>
           </div>
         </section>
@@ -115,8 +159,14 @@ export default async function InsightsPage() {
           <span className="shrink-0 text-xs text-slate-400">clustered · 30d</span>
         </div>
         {parsedThemes.length === 0 ? (
-          <div className="py-6 text-center text-sm text-slate-400 border border-dashed border-white/10 rounded-lg mt-2">
-            No themes detected yet.
+          <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed border-white/10 py-8 text-center mt-2">
+            <p className="text-sm text-slate-400">No themes detected yet — themes appear after your first VoC analysis.</p>
+            <Link
+              href="/settings"
+              className="inline-flex h-8 items-center rounded-lg bg-slate-700 px-3 text-xs font-medium text-slate-200 hover:bg-slate-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+            >
+              Connect a feedback source
+            </Link>
           </div>
         ) : (
           <ul className="space-y-3 mt-4">
@@ -141,13 +191,35 @@ export default async function InsightsPage() {
         <div className="mb-4 flex items-baseline justify-between gap-3">
           <div className="min-w-0">
             <h2 className="truncate text-sm font-semibold text-white">Raw feedback sample</h2>
-            <p className="truncate text-xs text-slate-400">processed in transit · not persisted</p>
+            <p className="truncate text-xs text-slate-400">most recent ingested · tenant-scoped</p>
           </div>
           <ExportVocButton />
         </div>
-        <div className="py-6 text-center text-sm text-slate-400 border border-dashed border-white/10 rounded-lg mt-4">
-          No raw feedback samples available.
-        </div>
+        {samplesData.samples.length === 0 ? (
+          <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed border-white/10 py-8 text-center mt-4">
+            <p className="text-sm text-slate-400">No feedback ingested yet. Connect Zendesk, Intercom, or Typeform to start capturing customer signals.</p>
+            <Link
+              href="/settings"
+              className="inline-flex h-8 items-center rounded-lg bg-slate-700 px-3 text-xs font-medium text-slate-200 hover:bg-slate-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+            >
+              Connect a feedback source
+            </Link>
+          </div>
+        ) : (
+          <ul className="mt-2 divide-y divide-white/5">
+            {samplesData.samples.map((s) => (
+              <li key={s.id} className="py-3">
+                <div className="flex items-center gap-2 mb-1">
+                  <Badge variant="voc" dot>{s.source_type}</Badge>
+                  <span className="text-xs text-slate-500">
+                    {s.ingested_at ? new Date(s.ingested_at).toLocaleString() : "—"}
+                  </span>
+                </div>
+                <p className="text-sm text-slate-300 line-clamp-3">{s.content}</p>
+              </li>
+            ))}
+          </ul>
+        )}
       </section>
     </div>
   );

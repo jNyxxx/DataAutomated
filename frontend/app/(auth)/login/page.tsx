@@ -6,7 +6,7 @@ import { Eye, EyeOff, Settings } from 'lucide-react';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('demo@dataautomated.io');
-  const [password, setPassword] = useState('supersecret24');
+  const [password, setPassword] = useState('Demo1234!');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
@@ -94,11 +94,11 @@ export default function LoginPage() {
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" className="size-5"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>
               </span>
               <span className="leading-tight">
-                <span className="block text-base font-semibold tracking-tight text-white">Data<span className="text-accent">●</span>Automated</span>
+                <span className="block text-base font-semibold tracking-tight text-white">DataAutomated</span>
                 <span className="block text-xs text-slate-400">Intelligence Platform</span>
               </span>
             </div>
-            <a href="#" className="fr hidden rounded-md px-1 text-sm text-slate-400 transition-colors hover:text-slate-200 sm:block">New here? <span className="text-accent font-medium">Start free →</span></a>
+            <span className="hidden rounded-md px-1 text-sm text-slate-400 sm:block">Demo account · <span className="text-accent font-medium">invite only</span></span>
           </header>
 
           {/* ============ MAIN ============ */}
@@ -213,7 +213,7 @@ export default function LoginPage() {
                       <label htmlFor="pw" className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-widest text-slate-500">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" className="size-3.5"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>Password
                       </label>
-                      <a href="#" className="fr rounded text-[11px] font-semibold uppercase tracking-widest text-accent hover:opacity-80">Forgot?</a>
+                      <span className="text-[11px] font-semibold uppercase tracking-widest text-slate-600">Contact admin to reset</span>
                     </div>
                     <div className="well flex h-11 items-center gap-2 rounded-lg px-3.5">
                       <input id="pw" type={showPassword ? "text" : "password"} value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" className="w-full bg-transparent text-sm text-slate-200 outline-none placeholder:text-slate-500" />
@@ -244,7 +244,7 @@ export default function LoginPage() {
                   </button>
                 </form>
 
-                <p className="mt-6 text-center text-sm text-slate-400">Want passwordless access? <a href="#" className="fr rounded font-medium text-accent hover:opacity-80">Request a Magic Link</a></p>
+                <p className="mt-6 text-center text-sm text-slate-500">Access is by invitation. Contact your account manager to get set up.</p>
               </div>
             </section>
           </main>
@@ -252,7 +252,7 @@ export default function LoginPage() {
           {/* ============ FOOTER ============ */}
           <footer className="flex flex-col gap-3 border-t border-white/[0.06] px-6 py-5 text-xs text-slate-500 sm:flex-row sm:items-center sm:justify-between lg:px-12">
             <span>© 2026 DataAutomated.io</span>
-            <a href="#" className="fr rounded text-slate-400 transition-colors hover:text-slate-200">Contact support</a>
+            <a href="mailto:support@dataautomated.io" className="fr rounded text-slate-400 transition-colors hover:text-slate-200">Contact support</a>
           </footer>
         </div>
       </div>

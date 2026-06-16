@@ -260,9 +260,131 @@ async def _validate_news(creds: dict) -> tuple[bool, str | None]:
     return False, _map_status(r.status_code, "news")
 
 
+async def _validate_hubspot(creds: dict) -> tuple[bool, str | None]:
+    access_token = creds.get("access_token", "").strip()
+    if not access_token:
+        return False, "Private App Access Token is required."
+
+    url = "https://api.hubapi.com/crm/v3/objects/contacts?limit=1"
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await _get(client, url, headers={"Authorization": f"Bearer {access_token}"})
+    except httpx.ConnectError:
+        return False, "Could not reach api.hubapi.com — check your network."
+    except httpx.TimeoutException:
+        return False, "Connection timed out — HubSpot API may be slow, retry shortly."
+
+    if r.status_code == 200:
+        return True, None
+    if r.status_code == 401:
+        return False, "Invalid token — generate a new Private App token in HubSpot Settings → Integrations → Private Apps."
+    if r.status_code == 403:
+        return False, "Access denied — the token lacks the required scopes (crm.objects.contacts.read)."
+    return False, _map_status(r.status_code, "hubspot")
+
+
+async def _validate_reddit(creds: dict) -> tuple[bool, str | None]:
+    client_id = creds.get("client_id", "").strip()
+    client_secret = creds.get("client_secret", "").strip()
+    user_agent = creds.get("user_agent", "dataautomated/1.0").strip()
+
+    if not client_id:
+        return False, "Reddit App Client ID is required."
+    if not client_secret:
+        return False, "Reddit App Client Secret is required."
+
+    try:
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            r = await client.post(
+                "https://www.reddit.com/api/v1/access_token",
+                auth=(client_id, client_secret),
+                data={"grant_type": "client_credentials"},
+                headers={"User-Agent": user_agent},
+            )
+    except httpx.ConnectError:
+        return False, "Could not reach reddit.com — check your network."
+    except httpx.TimeoutException:
+        return False, "Connection timed out — Reddit API may be slow, retry shortly."
+
+    if r.status_code == 200 and "access_token" in r.json():
+        return True, None
+    if r.status_code == 401:
+        return False, "Invalid Client ID or Secret — check your Reddit app credentials at reddit.com/prefs/apps."
+    return False, _map_status(r.status_code, "reddit")
+
+
+async def _validate_google_news(creds: dict) -> tuple[bool, str | None]:
+    api_key = creds.get("api_key", "").strip()
+    if not api_key:
+        return False, "SerpAPI Key is required (https://serpapi.com/manage-api-key)."
+
+    url = f"https://serpapi.com/search?engine=google_news&q=test&api_key={api_key}&num=1"
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await _get(client, url)
+    except httpx.ConnectError:
+        return False, "Could not reach serpapi.com — check your network."
+    except httpx.TimeoutException:
+        return False, "Connection timed out — SerpAPI may be slow, retry shortly."
+
+    if r.status_code == 200:
+        return True, None
+    if r.status_code == 401:
+        return False, "Invalid SerpAPI Key — verify it at serpapi.com/manage-api-key."
+    if r.status_code == 429:
+        return False, "SerpAPI rate limit or plan limit reached. Check your account at serpapi.com."
+    return False, _map_status(r.status_code, "google_news")
+
+
+async def _validate_ga4(creds: dict) -> tuple[bool, str | None]:
+    property_id = creds.get("property_id", "").strip()
+    credentials_json_str = creds.get("credentials_json", "").strip()
+
+    if not property_id:
+        return False, "GA4 Property ID is required (numeric, found in GA4 Admin → Property Settings)."
+    if not credentials_json_str:
+        return False, "Service Account JSON is required (GCP Console → IAM → Service Accounts → Create Key)."
+
+    try:
+        sa = __import__("json").loads(credentials_json_str)
+    except Exception:
+        return False, "Service Account JSON is not valid JSON — paste the full contents of the downloaded key file."
+
+    if "client_email" not in sa or "private_key" not in sa:
+        return False, "Service Account JSON must contain 'client_email' and 'private_key' fields."
+
+    # Lightweight auth check: request a token (no data read needed)
+    try:
+        from app.tools.ga4_tool import _get_access_token
+        token = await _get_access_token(sa)
+        if not token:
+            return False, "Could not obtain an access token — check the service account JSON."
+        return True, None
+    except Exception as exc:
+        msg = str(exc)
+        if "403" in msg or "PERMISSION_DENIED" in msg:
+            return False, (
+                "Service account does not have access to this GA4 property. "
+                "Add it as a Viewer in GA4 Admin → Property → Property Access Management."
+            )
+        return False, f"GA4 auth failed: {msg[:200]}"
+
+
 async def _validate_competitor_monitor(creds: dict, config: dict) -> tuple[bool, str | None]:
-    competitors = config.get("competitors", "").strip()
-    if not competitors:
+    competitors = config.get("competitors")
+    if isinstance(competitors, str):
+        competitors = [competitors]
+    if not isinstance(competitors, list):
+        competitors = []
+    normalized = [
+        competitor.strip()
+        for competitor in competitors
+        if isinstance(competitor, str) and competitor.strip()
+    ]
+    single = config.get("competitor_name")
+    if isinstance(single, str) and single.strip():
+        normalized.append(single.strip())
+    if not normalized:
         return False, "At least one competitor name is required in the configuration."
     return True, None
 
@@ -273,13 +395,17 @@ async def _validate_competitor_monitor(creds: dict, config: dict) -> tuple[bool,
 NO_CREDS_SOURCES = frozenset({"g2", "capterra", "linkedin_jobs"})
 
 _VALIDATORS = {
-    "zendesk":            _validate_zendesk,
-    "typeform":           _validate_typeform,
-    "intercom":           _validate_intercom,
-    "mixpanel":           _validate_mixpanel,
-    "segment":            _validate_segment,
-    "shopify":            _validate_shopify,
-    "news":               _validate_news,
+    "zendesk":      _validate_zendesk,
+    "typeform":     _validate_typeform,
+    "intercom":     _validate_intercom,
+    "hubspot":      _validate_hubspot,
+    "mixpanel":     _validate_mixpanel,
+    "segment":      _validate_segment,
+    "shopify":      _validate_shopify,
+    "ga4":          _validate_ga4,
+    "news":         _validate_news,
+    "reddit":       _validate_reddit,
+    "google_news":  _validate_google_news,
 }
 
 

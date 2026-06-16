@@ -79,7 +79,19 @@ services:
     volumes:
       - n8n_data:/home/node/.n8n
       # Exported, version-controlled workflows (CLAUDE.md §13).
-      - ./n8n/workflows:/workflows
+      - ./n8n/workflows:/workflows:ro
+    # Auto-import all workflow JSONs from /workflows before starting n8n.
+    # Idempotent: re-importing an existing workflow ID updates it in-place.
+    # || true ensures n8n starts even if no workflows exist yet.
+    entrypoint: /bin/sh
+    command: >
+      -c "n8n import:workflow --separate --input=/workflows/ || true && exec n8n"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:5678/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
 
   minio:
     image: quay.io/minio/minio:latest

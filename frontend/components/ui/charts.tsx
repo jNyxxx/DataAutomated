@@ -1,21 +1,57 @@
 import React from 'react';
 
-// Sparkline
+// Sparkline — stock-chart style with smooth bezier curves and gradient area fill
 export function Sparkline({ points, color, height = 40 }: { points: readonly number[], color: string, height?: number }) {
   if (!points || points.length === 0) return null;
+
   const w = 120;
-  const max = Math.max(...points, 1);
+  const padY = 4;
+
+  if (points.length === 1) {
+    const mid = height / 2;
+    return (
+      <svg viewBox={`0 0 ${w} ${height}`} preserveAspectRatio="none" className="w-full" style={{ height: `${height}px` }}>
+        <line x1="0" y1={mid} x2={w} y2={mid} stroke={color} strokeWidth="1.5" strokeOpacity="0.4" />
+        <circle cx={w} cy={mid} r="2.5" fill={color} />
+      </svg>
+    );
+  }
+
   const min = Math.min(...points);
-  
-  const X = (i: number) => i * (w / (Math.max(points.length - 1, 1)));
-  const Y = (v: number) => height - 3 - ((v - min) / ((max - min) || 1)) * (height - 6);
-  
-  const d = points.map((v, i) => (i ? 'L' : 'M') + X(i).toFixed(1) + ' ' + Y(v).toFixed(1)).join(' ');
-  
+  const max = Math.max(...points);
+  const range = max === min ? 0 : max - min;
+  const X = (i: number) => (i / (points.length - 1)) * w;
+  const Y = (v: number) => {
+    if (range === 0) return height / 2;
+    return height - padY - ((v - min) / range) * (height - padY * 2);
+  };
+
+  const pts = points.map((v, i) => ({ x: X(i), y: Y(v) }));
+
+  // Cubic bezier: control points at the horizontal midpoint keep the curve smooth without overshooting
+  let linePath = `M${pts[0].x.toFixed(1)},${pts[0].y.toFixed(1)}`;
+  for (let i = 1; i < pts.length; i++) {
+    const cpx = ((pts[i - 1].x + pts[i].x) / 2).toFixed(1);
+    linePath += ` C${cpx},${pts[i - 1].y.toFixed(1)} ${cpx},${pts[i].y.toFixed(1)} ${pts[i].x.toFixed(1)},${pts[i].y.toFixed(1)}`;
+  }
+
+  const last = pts[pts.length - 1];
+  const areaPath = `${linePath} L${w},${height} L0,${height} Z`;
+  // Use a safe CSS id from the hex color (strip # and non-alphanum)
+  const gradId = `sg${color.replace(/[^a-z0-9]/gi, '')}`;
+
   return (
     <svg viewBox={`0 0 ${w} ${height}`} preserveAspectRatio="none" className="w-full" style={{ height: `${height}px` }}>
-      <path d={`${d} L${w} ${height} L0 ${height} Z`} fill={color} fillOpacity="0.14" />
-      <path d={d} fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      <defs>
+        <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={color} stopOpacity="0.38" />
+          <stop offset="75%" stopColor={color} stopOpacity="0.06" />
+          <stop offset="100%" stopColor={color} stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      <path d={areaPath} fill={`url(#${gradId})`} />
+      <path d={linePath} fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+      <circle cx={last.x.toFixed(1)} cy={last.y.toFixed(1)} r="2.5" fill={color} />
     </svg>
   );
 }
@@ -77,16 +113,19 @@ export function Gauge({ value, color }: { value: number, color: string }) {
 // Funnel Chart
 export function FunnelChart({ steps }: { steps: readonly { l: string, pct: number, n: string | number, crit?: boolean }[] }) {
   return (
-    <div className="space-y-3">
+    <div className="space-y-2">
       {steps.map((s, i) => (
-        <div key={i} className="flex items-center gap-3">
-          <div className="relative h-9 min-w-0 flex-1 overflow-hidden rounded-md bg-slate-900/60">
-            <div className={`absolute inset-y-0 left-0 rounded-md ${s.crit ? 'bg-rose-500/80' : 'bg-blue-500/80'}`} style={{ width: `${Math.max(4, s.pct)}%` }} />
-            <div className="relative flex h-full items-center px-3">
-              <span className="truncate text-[13px] font-semibold text-white">{s.l}</span>
+        <div key={i} className="flex items-center gap-4">
+          <div className="relative h-11 min-w-0 flex-1 overflow-hidden rounded-xl bg-slate-900/60 border border-white/5 shadow-inner">
+            <div 
+              className={`absolute inset-y-0 left-0 min-w-[44px] rounded-xl ${s.crit ? 'bg-rose-500' : 'bg-blue-500'}`} 
+              style={{ width: `${Math.max(2, s.pct)}%` }} 
+            />
+            <div className="relative flex h-full items-center px-4">
+              <span className="truncate text-sm font-semibold text-white drop-shadow-md">{s.l}</span>
             </div>
           </div>
-          <span className="w-32 shrink-0 text-right text-xs tabular-nums text-slate-400">{s.pct}% · {s.n}</span>
+          <span className="w-28 shrink-0 text-right text-sm tabular-nums text-slate-300">{s.pct}% · {s.n}</span>
         </div>
       ))}
     </div>

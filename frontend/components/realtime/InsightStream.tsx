@@ -3,6 +3,7 @@
 import { useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import type { SSEEvent } from '@/lib/types';
+import { useToast } from '@/components/ui/Toast';
 
 interface InsightStreamProps {
   onEvent?: (event: SSEEvent) => void;
@@ -10,19 +11,37 @@ interface InsightStreamProps {
 
 export function InsightStream({ onEvent }: InsightStreamProps) {
   const router = useRouter();
+  const { toast } = useToast();
 
   const handleMessage = useCallback(
     (e: MessageEvent<string>) => {
       try {
         const event = JSON.parse(e.data) as SSEEvent;
         onEvent?.(event);
-        // Re-fetch Server Component data so new items appear without a full reload
+
+        if (event.event_type === 'job') {
+          const typeLabel = { voc: 'VoC', comp_signal: 'Competitive', journey: 'Journey' }[event.job_type] ?? event.job_type;
+          if (event.status === 'succeeded') {
+            toast(`${typeLabel} analysis complete`, 'success');
+          } else {
+            toast(`${typeLabel} analysis failed`, 'error');
+          }
+          window.dispatchEvent(new CustomEvent('da:job', { detail: event }));
+          router.refresh();
+          return;
+        }
+
+        const label =
+          event.event_type === 'insight' ? 'New VoC insight available' :
+          event.event_type === 'signal'  ? 'New competitive signal detected' :
+                                           'Journey data updated';
+        toast(label, 'info');
         router.refresh();
       } catch {
         // ignore malformed frames
       }
     },
-    [onEvent, router],
+    [onEvent, router, toast],
   );
 
   useEffect(() => {

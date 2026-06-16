@@ -14,6 +14,7 @@ journey workflow is introduced.
 
 from __future__ import annotations
 
+import datetime as _dt
 import logging
 from uuid import UUID
 
@@ -25,19 +26,33 @@ from app.routers.auth import CurrentUser, get_current_user, require_role
 
 logger = logging.getLogger("dataautomated")
 
+
+def _row_dict(row) -> dict:
+    """Convert asyncpg Record to JSON-safe dict: ISO-8601 datetimes, UUIDs as str, numerics unchanged."""
+    result = {}
+    for k, v in dict(row).items():
+        if v is None:
+            result[k] = None
+        elif isinstance(v, (_dt.datetime, _dt.date)):
+            result[k] = v.isoformat()
+        elif isinstance(v, UUID):
+            result[k] = str(v)
+        else:
+            result[k] = v
+    return result
+
+
 router = APIRouter(prefix="/journeys", tags=["Journey Analytics"])
 
 
 async def _run_journey_analysis(client_id: UUID) -> None:
-    """Dispatch the Journey LangGraph agent. Background tasks must not propagate exceptions."""
+    """Dispatch the Journey LangGraph agent with job lifecycle tracking."""
     if not settings.openai_api_key:
         logger.warning("OPENAI_API_KEY not configured; Journey agent skipped for client %s", client_id)
         return
-    try:
-        from app.agents.journey_agent import run_journey_analysis
-        await run_journey_analysis(client_id)
-    except Exception:
-        logger.exception("Journey agent run failed for client %s", client_id)
+    from app.services.job_service import run_tracked
+    from app.agents.journey_agent import run_journey_analysis
+    await run_tracked(client_id, "journey", run_journey_analysis(client_id))
 
 
 @router.post("/analyze", status_code=202, summary="Trigger Journey analysis (async)")
@@ -65,24 +80,83 @@ async def latest(
     isolation per CLAUDE.md §6.
     """
     async with acquire_for_client(current_user.client_id) as conn:
+        # Count distinct funnel steps — raw row count would include duplicates from
+        # multiple agent runs before the DELETE-before-INSERT fix is in effect.
         total = await conn.fetchval(
-            "SELECT COUNT(*) FROM journey_insights WHERE client_id = $1",
+            "SELECT COUNT(DISTINCT funnel_step) FROM journey_insights WHERE client_id = $1",
             current_user.client_id,
         )
+        # DISTINCT ON keeps the most-recent row per funnel_step, then the outer query
+        # re-sorts by recency and applies pagination.
         rows = await conn.fetch(
             "SELECT id, funnel_step, drop_off_rate, friction_score, "
             "       friction_cause, recommendation, projected_lift, created_at "
-            "FROM journey_insights "
-            "WHERE client_id = $1 "
+            "FROM ("
+            "    SELECT DISTINCT ON (funnel_step) "
+            "        id, funnel_step, drop_off_rate, friction_score, "
+            "        friction_cause, recommendation, projected_lift, created_at "
+            "    FROM journey_insights "
+            "    WHERE client_id = $1 "
+            "    ORDER BY funnel_step, created_at DESC"
+            ") latest_per_step "
             "ORDER BY created_at DESC LIMIT $2 OFFSET $3",
             current_user.client_id,
             limit,
             offset,
         )
     return {
-        "insights": [
-            {k: str(v) if v is not None else None for k, v in dict(r).items()}
-            for r in rows
-        ],
+        "insights": [_row_dict(r) for r in rows],
         "total": total,
     }
+
+
+@router.get("/device-breakdown", summary="Device breakdown from journey events (30d)")
+async def device_breakdown(current_user: CurrentUser = Depends(get_current_user)):
+    async with acquire_for_client(current_user.client_id) as conn:
+        rows = await conn.fetch(
+            "SELECT COALESCE(properties->>'device', 'unknown') AS device, "
+            "COUNT(*)::int AS count "
+            "FROM journey_events "
+            "WHERE client_id = $1 "
+            "AND occurred_at >= NOW() - INTERVAL '30 days' "
+            "GROUP BY 1 "
+            "ORDER BY 2 DESC, 1 ASC",
+            current_user.client_id,
+        )
+
+    total = sum(row["count"] for row in rows)
+    if total <= 0:
+        return {"devices": []}
+
+    return {
+        "devices": [
+            {
+                "device": row["device"],
+                "count": row["count"],
+                "pct": round(row["count"] / total * 100),
+            }
+            for row in rows
+        ]
+    }
+
+
+@router.get("/{journey_id}", summary="Get a specific journey insight by ID")
+async def get_journey_by_id(
+    journey_id: UUID,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Returns a specific journey insight ensuring tenant isolation."""
+    async with acquire_for_client(current_user.client_id) as conn:
+        row = await conn.fetchrow(
+            "SELECT id, funnel_step, drop_off_rate, friction_score, "
+            "       friction_cause, recommendation, projected_lift, created_at "
+            "FROM journey_insights "
+            "WHERE id = $1 AND client_id = $2",
+            journey_id,
+            current_user.client_id,
+        )
+    if not row:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Journey insight not found")
+        
+    return _row_dict(row)

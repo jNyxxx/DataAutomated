@@ -56,7 +56,7 @@ These also ratify the long-standing governance gates D1–D4 / MTLS-* (see §6).
 | SR-03 | PII flowed unmasked to LangSmith | FIXED | `services/trace_redaction.py` redacting client wired into all 3 agents' `@traceable`; tracing stays ON. Tested. Supersedes P3-05. |
 | SR-04 | GDPR erasure missing | FIXED (minimal) + RESIDUAL | `services/gdpr_service.py` + `POST /api/clients/me/erase` (admin, self-tenant, confirm-gated) erase-and-anonymise. Full DSAR export = RESIDUAL. |
 | SR-05 | Zero frontend tests | FIXED | Vitest harness; `lib/__tests__/{auth,api}.test.ts` cover JWT-expiry + API config (incl. LB-05 regression); `frontend-tests` CI job gates deploy. |
-| SR-06 | Rate limiting process-local only | MITIGATED | In-process limiter retained (acceptable single-task); AWS WAF rules documented in §5 as the production answer (= LT-RateLimit-01 / P4-03). |
+| SR-06 | Rate limiting process-local only | FIXED | Phase 8: Postgres-backed distributed rate limiter (`services/rate_limit_service.py`) — INSERT … ON CONFLICT DO UPDATE per-window counter; correct across all ECS tasks. Per-IP limits on `/auth/token` + webhooks; per-client limits (300/min) on API paths. In-process limiter removed. AWS WAF rules documented in §5 as additional defence-in-depth for production. |
 | SR-07 | CORS / security posture too implicit | FIXED | `config.py` prod validator rejects wildcard CORS; frontend CSP/headers added (= P4-01/P4-02). |
 
 ### C. Hardening (prompt P3-* / P4-*)
@@ -99,7 +99,7 @@ These also ratify the long-standing governance gates D1–D4 / MTLS-* (see §6).
 | OP-04 | Daily health checklist | RESIDUAL (ops) | CLAUDE.md §16 checklist. |
 | OP-05 | Agent-trace QA gate | RESIDUAL (ops) | "0 failed runs in 48h" exit bar. |
 | LT-01…07 | Performance targets unverified vs live AWS | RESIDUAL | k6 scripts authored; need a live load environment. |
-| LT-RateLimit-01 | In-process limiter not distributed | MITIGATED | = SR-06 (WAF documented). |
+| LT-RateLimit-01 | In-process limiter not distributed | FIXED | = SR-06 (Postgres-backed distributed limiter shipped Phase 8; WAF documented as defence-in-depth). |
 | MTLS-D1 | Auth = custom JWT | FIXED (ratified) | §6. |
 | MTLS-D2 | No ad-hoc asyncpg; single pool | FIXED (ratified) | §6. |
 | MTLS-D3 | Alembic = sole schema authority | FIXED (ratified) | §6 (= L4). |
@@ -163,7 +163,31 @@ already stored in the EFS volume or n8n will not start.
 - **L2 / D-HB-05 / MTLS-Default-01:** Extended RLS to `data_sources`, `reports`, and
   client-specific `knowledge_embeddings` is adopted (preserving NULL=global semantics).
 
-## 7. Verdict
+## 7. Local-mode security notes
+
+**Static `/reports` mount — RESOLVED:** The unauthenticated `StaticFiles` mount for
+`/reports/local/<key>` referenced in the original audit has been removed from `backend/app/main.py`.
+Report downloads now exclusively use `GET /api/reports/{id}/download-url` (JWT-gated, presigned
+MinIO/S3 URL with 15-minute expiry). No unauthenticated file-serving path remains in the backend.
+
+**Stray credential files sweep (2026-06-17) — RESOLVED:** Four root-level scratch scripts were found
+containing hardcoded credentials and have been deleted:
+
+| File | Credential exposed | Action |
+|---|---|---|
+| `send_email.py` | Resend API key `re_KuvumSLt_...` (live key) | Deleted — **rotate immediately** in Resend dashboard |
+| `fix.py` | DB DSN + password `Demo1234!` | Deleted |
+| `backend/app/fetch_real_time.py` | Hardcoded client UUID | Deleted |
+| `setup_n8n.py` | n8n JWT API key (expires 2026-08-10) + AWS ALB URL | Deleted — **revoke in n8n API key settings** |
+
+**Out-of-scope code removed (2026-06-17) — RESOLVED:** A self-serve signup flow (`POST /auth/signup`,
+`POST /auth/verify-email`, migration `0008_self_serve_signup.py`) and two fake OAuth pages
+(`/oauth/authorize`, `/oauth/callback` — the callback stored garbage `mock_oauth_token_*` strings
+as real credentials) were present in untracked files and have been removed. These contradicted the
+**invite-only auth ruling** recorded in §2 / the plan. All legitimate Phase 1 invite routes
+(`POST /auth/invites`, `GET /auth/invites/{token}/accept`, `POST /auth/users`) are unaffected.
+
+## 8. Verdict
 
 **NOT READY FOR PUBLIC-CLIENT LAUNCH — but every code-addressable launch blocker and
 systemic risk is closed.** Remaining gates are environment/process, not code:

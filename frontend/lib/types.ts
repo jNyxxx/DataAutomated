@@ -11,12 +11,34 @@ export interface AuthTokenResponse {
 }
 
 // Dashboard
+export interface AgentRun {
+  actor: string;
+  resource: string;
+  created_at: string | null;
+}
+
 export interface DashboardSummary {
   sentiment_score: number | null;
   churn_risk: number | null;
   unread_signals: number | null;
+  critical_signals?: number;
   latest_funnel_step: string | null;
   latest_drop_off_rate: number | null;
+  agent_runs_24h: number;
+  runs_hourly?: number[];
+  recent_agent_runs: AgentRun[];
+}
+
+// Raw feedback samples
+export interface FeedbackSample {
+  id: string;
+  source_type: string;
+  content: string;
+  ingested_at: string | null;
+}
+
+export interface FeedbackSamplesResponse {
+  samples: FeedbackSample[];
 }
 
 // VoC Insights
@@ -53,6 +75,23 @@ export interface CompetitiveSignal {
 export interface SignalsListResponse {
   signals: CompetitiveSignal[];
   total: number;
+}
+
+export interface SignalOverviewResponse {
+  period: string;
+  signals_7d: number;
+  tracked_competitors: number;
+  velocity: { day: string; label: string; count: number }[];
+  competitors: { name: string; count: number }[];
+  latest_context: string | null;
+  share_of_voice?: Record<string, Record<string, number>>;
+}
+
+export interface AddTrackedCompetitorResponse {
+  status: string;
+  source_id: string;
+  tracked_competitors: string[];
+  analysis_queued: boolean;
 }
 
 // Journey Insights
@@ -107,6 +146,17 @@ export interface ReportsListResponse {
   reports: Report[];
 }
 
+export interface ReportEditionStatsResponse {
+  sources: number;
+  signals: number;
+  pages: number;
+  volume: { day: string; signals: number }[];
+}
+
+export interface DeviceBreakdownResponse {
+  devices: { device: string; count: number; pct: number }[];
+}
+
 // SSE Events
 export interface InsightSSEEvent {
   event_type: 'insight';
@@ -133,7 +183,16 @@ export interface JourneySSEEvent {
   created_at: string;
 }
 
-export type SSEEvent = InsightSSEEvent | SignalSSEEvent | JourneySSEEvent;
+export interface JobSSEEvent {
+  event_type: 'job';
+  id: string;
+  job_type: 'voc' | 'comp_signal' | 'journey';
+  status: 'succeeded' | 'failed' | 'dead';
+  last_error: string | null;
+  completed_at: string;
+}
+
+export type SSEEvent = InsightSSEEvent | SignalSSEEvent | JourneySSEEvent | JobSSEEvent;
 
 // Pagination
 export interface PaginationParams {
@@ -145,4 +204,58 @@ export interface PaginationParams {
 export interface AnalysisQueuedResponse {
   status: string;
   message: string;
+}
+
+// Team management (Phase 1)
+export interface TeamMember {
+  id: string;
+  email: string;
+  role: 'admin' | 'analyst' | 'viewer';
+  created_at: string | null;
+}
+
+export interface TeamListResponse {
+  users: TeamMember[];
+}
+
+export interface InviteResponse {
+  status: string;
+  email: string;
+  role: string;
+  expires_at: string;
+  email_sent: boolean;
+  accept_url?: string; // present in dev mode (no Resend domain)
+}
+
+export interface InviteLookupResponse {
+  email: string;
+  role: string;
+  expires_at: string;
+}
+
+export interface CreateUserResponse {
+  id: string;
+  email: string;
+  role: string;
+}
+
+// Agent jobs (Phase 6 — System panel)
+export type AgentJobStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'dead';
+export type AgentJobType = 'voc' | 'comp_signal' | 'journey';
+
+export interface AgentJob {
+  id: string;
+  job_type: AgentJobType;
+  status: AgentJobStatus;
+  attempts: number;
+  max_attempts: number;
+  last_error: string | null;
+  created_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+  next_retry_at: string | null;
+}
+
+export interface AgentJobsResponse {
+  jobs: AgentJob[];
 }

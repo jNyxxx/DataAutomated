@@ -75,8 +75,18 @@ class CompSignalState(TypedDict):
 
 class SignalClassification(BaseModel):
     signal_type: Literal[
-        "pricing", "product_launch", "hiring", "funding",
-        "patent", "review", "news", "other",
+        # Phase 3 expanded taxonomy — descriptive names the LLM picks naturally
+        "pricing_change",    # price increase/decrease, new tier, discount
+        "product_launch",    # new product, feature GA, major release
+        "product_update",    # minor release, changelog, patch
+        "hiring_spike",      # unusual job posting volume or strategic hires
+        "funding",           # fundraise, acquisition, IPO filing
+        "patent",            # patent filing or grant
+        "review_sentiment",  # G2/Capterra/Reddit review wave or rating shift
+        "partnership",       # new integration, channel deal, co-marketing
+        "regulatory",        # compliance action, government filing, lawsuit
+        "news",              # general press coverage
+        "other",             # anything else
     ]
     urgency: Literal["critical", "high", "medium", "low"]
 
@@ -104,8 +114,20 @@ async def fetch_competitors_node(state: CompSignalState) -> dict:
             for name in config.get("competitors", []) or []:
                 if isinstance(name, str) and name.strip():
                     names.append(name.strip())
+            single = config.get("competitor_name")
+            if isinstance(single, str) and single.strip():
+                names.append(single.strip())
 
-    competitors = [{"name": n} for n in names]
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for name in names:
+        key = name.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(name)
+
+    competitors = [{"name": n} for n in deduped]
     logger.info(
         '{"event": "compsig.fetch_competitors", "client_id": "%s", "count": %d}',
         state["client_id"],
@@ -166,8 +188,14 @@ async def mine_signals_node(state: CompSignalState) -> dict:
             continue
         for item in result:
             meta = item.get("metadata") or {}
+            # Support both "competitor_name" (NewsAPI, new tools) and "competitor" (legacy)
+            competitor_name = (
+                meta.get("competitor_name")
+                or meta.get("competitor")
+                or "unknown"
+            )
             raw_signals.append({
-                "competitor_name": meta.get("competitor_name", "unknown"),
+                "competitor_name": competitor_name,
                 "signal_source":   meta.get("signal_source", item.get("id", tool.name)),
                 "raw_content":     item.get("content", ""),
             })
@@ -199,9 +227,13 @@ def _build_classify_messages(signals: list[dict]) -> list:
         f"Classify these {len(signals)} competitor signals:\n\n"
         + "\n\n".join(blocks)
         + f"\n\nReturn a JSON array of exactly {len(signals)} objects in the same order. "
-        "Each object: signal_type (one of: pricing, product_launch, hiring, funding, "
-        "patent, review, news, other), urgency (one of: critical, high, medium, low). "
-        "Return ONLY the JSON array."
+        "Each object must have: "
+        "signal_type (one of: pricing_change, product_launch, product_update, hiring_spike, "
+        "funding, patent, review_sentiment, partnership, regulatory, news, other), "
+        "urgency (one of: critical, high, medium, low). "
+        "critical = immediate strategic response needed; high = action within a week; "
+        "medium = monitor; low = awareness only. "
+        "Return ONLY the JSON array, no markdown."
     )
     return [SystemMessage(content=system_msg), HumanMessage(content=user_msg)]
 

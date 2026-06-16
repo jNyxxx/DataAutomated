@@ -18,28 +18,34 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 
-def _s3_client():
+def _s3_client(endpoint_override: str | None = None):
     """Return a boto3 S3 client scoped to the configured region and optional endpoint.
 
-    When `settings.s3_endpoint_url` is set (local minio), path-style addressing is
-    forced because minio doesn't support DNS-wildcard virtual-hosted buckets.
+    Pass `endpoint_override` to use a different endpoint URL than the default
+    `settings.s3_endpoint_url` — used by `presign_report_url` so the signature
+    is computed against the browser-reachable host (e.g. localhost:9000) rather
+    than the internal Docker hostname (minio:9000). SigV4 includes the Host header
+    in the signature, so the two endpoints must be kept separate: API operations
+    (put_object, head_bucket) use the internal endpoint; presigning uses the public
+    endpoint so the generated URL's signature is valid when the browser fetches it.
 
-    SigV4 + explicit virtual addressing are forced unconditionally: without them
-    this botocore version presigns legacy SigV2 URLs against the global endpoint
-    (bucket.s3.amazonaws.com), which newly created buckets answer with
-    307 TemporaryRedirect until DNS propagates and which newer regions reject
-    outright. Virtual addressing pins the regional host
-    (bucket.s3.<region>.amazonaws.com) in generated URLs.
+    SigV4 + path-style addressing are used for MinIO (no DNS-wildcard virtual-host
+    support). In production (endpoint_url blank) virtual addressing is used so
+    presigned URLs embed the regional hostname.
     """
     from botocore.config import Config as _BotoConfig
 
+    endpoint = endpoint_override if endpoint_override is not None else settings.s3_endpoint_url
     kwargs: dict = {
         "region_name": settings.aws_region,
         "config": _BotoConfig(signature_version="s3v4", s3={"addressing_style": "virtual"}),
     }
-    if settings.s3_endpoint_url:
-        kwargs["endpoint_url"] = settings.s3_endpoint_url
+    if endpoint:
+        kwargs["endpoint_url"] = endpoint
         kwargs["config"] = _BotoConfig(signature_version="s3v4", s3={"addressing_style": "path"})
+    if settings.s3_access_key_id:
+        kwargs["aws_access_key_id"] = settings.s3_access_key_id
+        kwargs["aws_secret_access_key"] = settings.s3_secret_access_key
     return boto3.client("s3", **kwargs)
 
 # --------------------------------------------------------------------------- #
@@ -213,7 +219,7 @@ async def generate_report(
     pdf_bytes = _html_to_pdf(html)
 
     s3_key = f"{client_id}/{report_type}_{now.strftime('%Y%m%d')}.pdf"
-    s3_url = _upload_to_s3(pdf_bytes, s3_key)
+    s3_url = _upload_to_s3(pdf_bytes, s3_key)  # raises on S3 failure
 
     report_id = report_id or str(uuid.uuid4())
     # ON CONFLICT DO NOTHING: if the same client already has a report for this
@@ -252,7 +258,7 @@ def _html_to_pdf(html: str) -> bytes:
         return html.encode("utf-8")
 
 
-def presign_report_url(key: str | None, expires_in: int = 604800) -> str | None:
+def presign_report_url(key: str | None, expires_in: int = 604800, response_content_disposition: str | None = None) -> str | None:
     """
     Mint a presigned GET URL for a private report object (CLAUDE.md §14 — report
     PDFs are never public). n8n calls /api/reports/latest-for-client at send time,
@@ -260,17 +266,27 @@ def presign_report_url(key: str | None, expires_in: int = 604800) -> str | None:
     lifetime at 7 days (604800s); a weekly report is superseded within that window,
     so 7 days is the maximum useful TTL.
 
-    Returns None (logged) when signing can't happen — e.g. no AWS credentials in
-    local dev — so callers degrade gracefully instead of raising. A real signed URL
-    is therefore only produced where credentials resolve (the ECS task role in prod).
+    When `settings.s3_public_endpoint_url` is set (local MinIO), the internal Docker
+    hostname in the presigned URL is replaced with the browser-reachable host so the
+    frontend can download the file directly from localhost:9000.
+
+    Returns None (logged) on presign failure; callers raise 503 to fail loudly.
     """
     if not key:
         return None
     try:
-        s3 = _s3_client()
+        # Use the public endpoint for presigning so the signature is computed against
+        # the browser-reachable host. In local dev this is http://localhost:9000;
+        # in production s3_public_endpoint_url is None and the internal endpoint is used
+        # (which is also blank, so boto3 targets real S3 — correct in both cases).
+        presign_endpoint = settings.s3_public_endpoint_url or settings.s3_endpoint_url
+        s3 = _s3_client(endpoint_override=presign_endpoint)
+        params: dict = {"Bucket": settings.s3_reports_bucket, "Key": key}
+        if response_content_disposition:
+            params["ResponseContentDisposition"] = response_content_disposition
         return s3.generate_presigned_url(
             "get_object",
-            Params={"Bucket": settings.s3_reports_bucket, "Key": key},
+            Params=params,
             ExpiresIn=expires_in,
         )
     except (BotoCoreError, ClientError) as exc:
@@ -278,20 +294,19 @@ def presign_report_url(key: str | None, expires_in: int = 604800) -> str | None:
         return None
 
 
-def _upload_to_s3(data: bytes, key: str) -> str | None:
+def _upload_to_s3(data: bytes, key: str) -> str:
+    """Upload report bytes to S3/MinIO. Raises on failure — no local fallback."""
     bucket = settings.s3_reports_bucket
-    s3 = _s3_client()
     content_type = "application/pdf" if data[:4] == b"%PDF" else "text/html"
-    try:
-        s3.put_object(
-            Bucket=bucket,
-            Key=key,
-            Body=io.BytesIO(data),
-            ContentType=content_type,
-            ContentDisposition=f'attachment; filename="{key.split("/")[-1]}"',
-        )
-        # Objects are private (§14): hand back a presigned GET URL, never a raw path.
-        return presign_report_url(key)
-    except ClientError as exc:
-        logger.error("S3 upload failed key=%s error=%s", key, exc)
-        raise
+    s3 = _s3_client()
+    s3.put_object(
+        Bucket=bucket,
+        Key=key,
+        Body=io.BytesIO(data),
+        ContentType=content_type,
+        ContentDisposition=f'attachment; filename="{key.split("/")[-1]}"',
+    )
+    url = presign_report_url(key)
+    if url is None:
+        raise RuntimeError(f"S3 upload succeeded but presign failed for key={key}")
+    return url

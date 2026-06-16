@@ -350,6 +350,12 @@ async def store_node(state: JourneyState) -> dict:
         return {}
 
     async with acquire_for_client(state["client_id"]) as conn:
+        # Replace the previous run — journey insights represent current funnel state,
+        # not an append-only log. Without this, each agent run duplicates all rows.
+        await conn.execute(
+            "DELETE FROM journey_insights WHERE client_id = $1",
+            state["client_id"],
+        )
         for rec in recommendations:
             cause = rec.get("friction_cause")
             if cause not in _VALID_FRICTION:

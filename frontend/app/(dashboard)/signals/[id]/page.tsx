@@ -5,6 +5,7 @@ import { fetchSignalById } from '@/lib/api';
 import { Header } from '@/components/layout/Header';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { MarkReadButton } from '@/components/signals/SignalActions';
 
 interface SignalDetailPageProps {
   params: { id: string };
@@ -24,7 +25,12 @@ export default async function SignalDetailPage({ params }: SignalDetailPageProps
       <Header
         title={signal.competitor_name}
         description={`Detected ${format(new Date(signal.detected_at), 'MMM d, yyyy · h:mm a')}`}
-        actions={<Badge variant={(signal.urgency === 'medium' ? 'warning' : signal.urgency) as any}>{signal.urgency}</Badge>}
+        actions={
+          <div className="flex items-center gap-2">
+            <MarkReadButton id={signal.id} isRead={signal.is_read} />
+            <Badge variant={(signal.urgency === 'medium' ? 'warning' : signal.urgency) as any}>{signal.urgency}</Badge>
+          </div>
+        }
       />
 
       <div className="grid grid-cols-3 gap-4 mb-6">

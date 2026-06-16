@@ -3,7 +3,11 @@ import { NextRequest, NextResponse } from 'next/server';
 export async function POST(request: NextRequest) {
   const { email, password } = (await request.json()) as { email: string; password: string };
 
-  const backendUrl = process.env.API_URL_INTERNAL ?? 'http://localhost:8000';
+  const configured = process.env.API_URL_INTERNAL;
+  if (!configured && process.env.NODE_ENV === 'production') {
+    return NextResponse.json({ error: 'Server misconfiguration: API_URL_INTERNAL not set' }, { status: 503 });
+  }
+  const backendUrl = configured ?? 'http://localhost:8000';
   const body = new URLSearchParams({ username: email, password });
 
   const res = await fetch(`${backendUrl}/auth/token`, {
@@ -27,7 +31,7 @@ export async function POST(request: NextRequest) {
     httpOnly: true,
     sameSite: 'lax',
     path: '/',
-    maxAge: 3600,
+    maxAge: 14400,
     secure: process.env.NODE_ENV === 'production',
   });
 

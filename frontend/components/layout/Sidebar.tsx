@@ -16,9 +16,9 @@ const NAV_GROUPS = [
   {
     group: "Intelligence",
     items: [
-      { id: "insights", href: "/insights", label: "Voice of Customer", dot: "bg-teal-400", icon: BrainCircuit },
-      { id: "signals", href: "/signals", label: "Competitive Signals", count: 3, dot: "bg-rose-400", icon: Activity },
-      { id: "journeys", href: "/journeys", label: "Journey Intelligence", dot: "bg-blue-400", icon: Route },
+      { id: "insights", href: "/insights", label: "Voice of Customer", icon: BrainCircuit },
+      { id: "signals", href: "/signals", label: "Competitive Signals", icon: Activity },
+      { id: "journeys", href: "/journeys", label: "Journey Intelligence", icon: Route },
       { id: "reports", href: "/reports", label: "Reports", icon: FileText },
     ]
   },
@@ -30,7 +30,7 @@ const NAV_GROUPS = [
   }
 ];
 
-export function Sidebar() {
+export function Sidebar({ clientName = "Your account", plan = "" }: { clientName?: string; plan?: string }) {
   const pathname = usePathname();
   const router = useRouter();
   const [profileOpen, setProfileOpen] = useState(false);
@@ -46,16 +46,17 @@ export function Sidebar() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  function handleLogout() {
-    document.cookie = 'access_token=; path=/; max-age=0';
-    router.push('/');
+  async function handleLogout() {
+    await fetch('/api/auth/logout', { method: 'POST' });
+    router.push('/login');
+    router.refresh();
   }
 
   return (
     <aside className="hidden w-64 shrink-0 flex-col bg-slate-900 md:flex border-r border-slate-800">
       <div className="flex items-center gap-2 px-5 py-5">
         <Link href="/dashboard" className="text-base font-semibold tracking-tight text-white hover:opacity-90">
-          Data<span className="text-blue-400">●</span>Automated
+          DataAutomated
         </Link>
       </div>
       
@@ -80,11 +81,6 @@ export function Sidebar() {
                     >
                       <Icon className={cn("h-5 w-5 shrink-0 transition-colors", active ? "text-white" : "text-slate-500 group-hover:text-slate-300")} strokeWidth={1.75} />
                       <span className="flex-1 truncate">{it.label}</span>
-                      {it.count ? (
-                        <span className="shrink-0 rounded-full bg-rose-500/15 px-1.5 text-xs font-medium text-rose-300">{it.count}</span>
-                      ) : it.dot ? (
-                        <span className={cn("size-2 shrink-0 rounded-full", it.dot)} />
-                      ) : null}
                     </Link>
                   </li>
                 );
@@ -122,10 +118,10 @@ export function Sidebar() {
             profileOpen ? "bg-slate-800" : "hover:bg-slate-800 active:scale-[0.98]"
           )}
         >
-          <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-blue-500/15 text-sm font-semibold text-blue-300">A</span>
+          <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-blue-500/15 text-sm font-semibold text-blue-300">{clientName.charAt(0).toUpperCase() || "?"}</span>
           <span className="min-w-0 flex-1">
-            <span className="block truncate text-sm font-medium text-slate-200">Acme SaaS Inc.</span>
-            <span className="block truncate text-xs text-slate-400">Intelligence Core</span>
+            <span className="block truncate text-sm font-medium text-slate-200">{clientName}</span>
+            <span className="block truncate text-xs text-slate-400">{plan || "DataAutomated"}</span>
           </span>
           <ChevronDown className={cn("size-4 shrink-0 text-slate-400 transition-transform duration-200", profileOpen && "rotate-180")} />
         </button>

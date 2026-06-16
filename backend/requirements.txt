@@ -46,3 +46,6 @@ resend>=2.3,<3.0                                             # P6: email deliver
 weasyprint>=62.0                                             # P6/P9: PDF generation (requires system libs: pango cairo)
 jinja2>=3.1,<4.0                                             # P6: HTML report templates
 boto3>=1.34,<2.0                                             # P6/P9: S3 uploads + Secrets Manager
+
+# ---- Observability (P11 — inert without SENTRY_DSN; env-gated at runtime) ----
+sentry-sdk[fastapi]>=2.0,<3.0

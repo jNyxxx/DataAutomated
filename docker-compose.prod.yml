@@ -35,3 +35,33 @@ services:
   n8n:
     # Single instance + persistent storage (RISK-11 stateful exception, ADR-008).
     restart: unless-stopped
+    # Auto-import version-controlled workflows from EFS on every container start.
+    # Idempotent: re-importing an existing workflow ID updates it in-place.
+    # EFS path for workflows: mount n8n_workflows_efs at /workflows (read-only).
+    # First-deploy: copy n8n/workflows/*.json to the EFS /workflows path via
+    # `aws ecs execute-command` or an init task before starting the n8n service.
+    entrypoint: /bin/sh
+    command: >
+      -c "n8n import:workflow --separate --input=/workflows/ || true && exec n8n"
+    volumes:
+      - n8n_efs:/home/node/.n8n
+      # Workflows come from EFS on AWS (populated from n8n/workflows/ in CI/deploy step).
+      # Mount as :ro — n8n writes its database to /home/node/.n8n, not /workflows.
+      - n8n_workflows_efs:/workflows:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:5678/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+volumes:
+  n8n_efs:
+    # Bind to an existing EFS volume in production via docker volume create --driver local
+    # with appropriate EFS mount options, or use the ECS task definition's volume stanzas
+    # (see .github/ecs/n8n-task-definition.json — the EFS VolumeConfiguration there is
+    # authoritative for Fargate; this entry is for docker compose parity runs only).
+    external: false
+  n8n_workflows_efs:
+    # Populated from n8n/workflows/*.json by the deploy pipeline before n8n starts.
+    external: false

@@ -86,6 +86,10 @@ _SEED_SQL: dict[str, str] = {
     "reports": (
         "INSERT INTO reports (client_id) VALUES ($1) RETURNING id;"
     ),
+    # Phase 6 DLQ table — RLS-enabled, same client_isolation policy
+    "agent_jobs": (
+        "INSERT INTO agent_jobs (client_id, job_type) VALUES ($1, 'voc') RETURNING id;"
+    ),
 }
 
 

@@ -325,6 +325,13 @@ async def delete_data_source(
         raise HTTPException(status_code=404, detail="Data source not found.")
 
     async with acquire_for_client(current_user.client_id) as conn:
+        # Delete related raw_feedback to prevent foreign key violation
+        await conn.execute(
+            "DELETE FROM raw_feedback WHERE source_id = $1 AND client_id = $2",
+            source_uuid,
+            current_user.client_id,
+        )
+        
         result = await conn.execute(
             "DELETE FROM data_sources WHERE id = $1 AND client_id = $2",
             source_uuid,

@@ -13,22 +13,27 @@ Audit scaffold (SR-05): structured login/auth-failure events logged to the
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import re
+import secrets
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from hmac import compare_digest
+from typing import Optional
 from uuid import UUID, uuid4
 
 import asyncpg
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Body, Depends, Header, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
 from passlib.context import CryptContext
+from pydantic import BaseModel
 
 import app.database as _db
 from app.config import settings
 from app.services.audit_service import record_audit
+from app.services.email_service import send_invite_email
 
 logger = logging.getLogger("dataautomated")
 
@@ -81,13 +86,14 @@ def validate_password_strength(password: str) -> None:
         )
 
 
-def _create_access_token(user_id: UUID, client_id: UUID) -> str:
+def _create_access_token(user_id: UUID, client_id: UUID, role: str = "viewer") -> str:
     expire = datetime.now(timezone.utc) + timedelta(
         minutes=settings.access_token_expire_minutes
     )
     payload = {
         "sub": str(user_id),
         "client_id": str(client_id),
+        "role": role,
         "jti": str(uuid4()),  # SR-01: unique token id for revocation
         "exp": expire,
     }
@@ -213,6 +219,7 @@ async def login(form: OAuth2PasswordRequestForm = Depends()):
     token = _create_access_token(
         user_id=row["id"],
         client_id=row["client_id"],
+        role=row["role"],
     )
     logger.info(
         '{"event": "auth.login", "user_id": "%s", "client_id": "%s"}',
@@ -437,3 +444,318 @@ async def resolve_service_client(client_id_raw: object) -> UUID:
             detail="Unknown or inactive client.",
         )
     return client_id
+
+
+# ---------------------------------------------------------------------------
+# Phase 1 — Invite-only onboarding & team management
+# ---------------------------------------------------------------------------
+
+_INVITE_TTL_DAYS = 7
+
+
+def _hash_token(raw: str) -> str:
+    """SHA-256 of the raw invite token — stored in DB; raw token travels only in URLs."""
+    return hashlib.sha256(raw.encode()).hexdigest()
+
+
+# ---- Pydantic request/response models ----
+
+class CreateUserBody(BaseModel):
+    email: str
+    password: str
+    role: str = "analyst"
+
+
+class CreateInviteBody(BaseModel):
+    email: str
+    role: str = "analyst"
+
+
+class AcceptInviteBody(BaseModel):
+    password: str
+
+
+class UpdateUserRoleBody(BaseModel):
+    role: str
+
+
+class UpdateClientBody(BaseModel):
+    name: Optional[str] = None
+
+
+# ---- Routes ----
+
+@router.post("/users", summary="Admin: create a teammate directly")
+async def create_user(
+    body: CreateUserBody,
+    current_user: CurrentUser = Depends(require_role("admin")),
+):
+    """
+    Admin creates a teammate (direct provisioning, no invite token needed).
+    The new user belongs to the same client as the admin.
+    """
+    validate_password_strength(body.password)
+    if body.role not in ("admin", "analyst", "viewer"):
+        raise HTTPException(status_code=422, detail="role must be admin, analyst, or viewer.")
+
+    if _db.pool is None:
+        raise HTTPException(status_code=503, detail="Database unavailable.")
+
+    hashed = _pwd_context.hash(body.password)
+    async with _db.pool.acquire() as conn:
+        existing = await conn.fetchval(
+            "SELECT id FROM users WHERE email = $1 AND client_id = $2",
+            str(body.email), current_user.client_id,
+        )
+        if existing:
+            raise HTTPException(status_code=409, detail="A user with that email already exists.")
+        user_id = await conn.fetchval(
+            "INSERT INTO users (client_id, email, hashed_password, role) "
+            "VALUES ($1, $2, $3, $4) RETURNING id",
+            current_user.client_id, str(body.email), hashed, body.role,
+        )
+
+    await record_audit(
+        "user.create",
+        client_id=current_user.client_id,
+        actor=str(current_user.id),
+        resource="POST /auth/users",
+        detail={"new_user_id": str(user_id), "role": body.role},
+    )
+    return {"id": str(user_id), "email": str(body.email), "role": body.role}
+
+
+@router.post("/invites", summary="Admin: issue an invite link")
+async def create_invite(
+    body: CreateInviteBody,
+    current_user: CurrentUser = Depends(require_role("admin")),
+):
+    """
+    Admin issues an invite. Returns the accept URL (and raw token in dev mode so
+    the flow works without a verified Resend domain).
+    """
+    if body.role not in ("admin", "analyst", "viewer"):
+        raise HTTPException(status_code=422, detail="role must be admin, analyst, or viewer.")
+
+    if _db.pool is None:
+        raise HTTPException(status_code=503, detail="Database unavailable.")
+
+    raw_token = secrets.token_urlsafe(32)
+    token_hash = _hash_token(raw_token)
+    expires_at = datetime.now(timezone.utc) + timedelta(days=_INVITE_TTL_DAYS)
+
+    # Fetch admin email for the invitation message
+    async with _db.pool.acquire() as conn:
+        admin_email = await conn.fetchval(
+            "SELECT email FROM users WHERE id = $1", current_user.id
+        )
+        org_name = await conn.fetchval(
+            "SELECT name FROM clients WHERE id = $1", current_user.client_id
+        )
+        await conn.execute(
+            "INSERT INTO user_invites "
+            "(client_id, email, role, token_hash, invited_by, expires_at) "
+            "VALUES ($1, $2, $3, $4, $5, $6)",
+            current_user.client_id, str(body.email), body.role,
+            token_hash, current_user.id, expires_at,
+        )
+
+    accept_url = f"{settings.frontend_url}/invite/{raw_token}"
+
+    # Try to send the email; fall back gracefully
+    email_sent = await send_invite_email(
+        to_email=str(body.email),
+        invite_token=raw_token,
+        invited_by_email=admin_email,
+        org_name=org_name or "DataAutomated",
+    )
+
+    await record_audit(
+        "invite.issue",
+        client_id=current_user.client_id,
+        actor=str(current_user.id),
+        resource="POST /auth/invites",
+        detail={"invitee": str(body.email), "role": body.role},
+    )
+
+    response: dict = {
+        "status": "invited",
+        "email": str(body.email),
+        "role": body.role,
+        "expires_at": expires_at.isoformat(),
+        "email_sent": email_sent,
+        # Always return the accept URL: if email failed the admin needs it to share manually.
+        "accept_url": accept_url,
+    }
+    return response
+
+
+@router.get("/invites/{token}", summary="Look up an invite (validate before accepting)")
+async def get_invite(token: str):
+    """
+    Validate an invite token (used by the frontend accept page to show the
+    invitee's email and check the token hasn't expired).
+    """
+    if _db.pool is None:
+        raise HTTPException(status_code=503, detail="Database unavailable.")
+
+    token_hash = _hash_token(token)
+    async with _db.pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT email, role, expires_at, accepted_at "
+            "FROM user_invites WHERE token_hash = $1",
+            token_hash,
+        )
+
+    if row is None:
+        raise HTTPException(status_code=404, detail="Invite not found.")
+    if row["accepted_at"] is not None:
+        raise HTTPException(status_code=410, detail="Invite already accepted.")
+    if row["expires_at"] < datetime.now(timezone.utc):
+        raise HTTPException(status_code=410, detail="Invite has expired.")
+
+    return {"email": row["email"], "role": row["role"], "expires_at": row["expires_at"].isoformat()}
+
+
+@router.post("/invites/{token}/accept", summary="Accept an invite and create account")
+async def accept_invite(token: str, body: AcceptInviteBody):
+    """
+    Invitee sets their password to complete account creation.
+    Issues a JWT so they are immediately logged in after accepting.
+    """
+    validate_password_strength(body.password)
+
+    if _db.pool is None:
+        raise HTTPException(status_code=503, detail="Database unavailable.")
+
+    token_hash = _hash_token(token)
+    async with _db.pool.acquire() as conn:
+        async with conn.transaction():
+            invite = await conn.fetchrow(
+                "SELECT id, client_id, email, role, expires_at, accepted_at "
+                "FROM user_invites WHERE token_hash = $1 FOR UPDATE",
+                token_hash,
+            )
+            if invite is None:
+                raise HTTPException(status_code=404, detail="Invite not found.")
+            if invite["accepted_at"] is not None:
+                raise HTTPException(status_code=410, detail="Invite already accepted.")
+            if invite["expires_at"] < datetime.now(timezone.utc):
+                raise HTTPException(status_code=410, detail="Invite has expired.")
+
+            # Check for existing user with this email in this client
+            existing = await conn.fetchval(
+                "SELECT id FROM users WHERE email = $1 AND client_id = $2",
+                invite["email"], invite["client_id"],
+            )
+            if existing:
+                raise HTTPException(status_code=409, detail="An account with that email already exists.")
+
+            hashed = _pwd_context.hash(body.password)
+            user_id = await conn.fetchval(
+                "INSERT INTO users (client_id, email, hashed_password, role) "
+                "VALUES ($1, $2, $3, $4) RETURNING id",
+                invite["client_id"], invite["email"], hashed, invite["role"],
+            )
+            await conn.execute(
+                "UPDATE user_invites SET accepted_at = NOW() WHERE id = $1",
+                invite["id"],
+            )
+
+    jwt_token = _create_access_token(user_id=user_id, client_id=invite["client_id"], role=invite["role"])
+
+    await record_audit(
+        "invite.accept",
+        client_id=invite["client_id"],
+        actor=str(user_id),
+        resource=f"POST /auth/invites/{token[:8]}…/accept",
+        detail={"email": invite["email"], "role": invite["role"]},
+    )
+
+    return {"access_token": jwt_token, "token_type": "bearer"}
+
+
+@router.get("/users", summary="List all teammates in this tenant")
+async def list_users(current_user: CurrentUser = Depends(require_role("admin", "analyst"))):
+    """Returns all users belonging to the current client. Admin/analyst only."""
+    if _db.pool is None:
+        raise HTTPException(status_code=503, detail="Database unavailable.")
+
+    async with _db.pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT id, email, role, created_at FROM users WHERE client_id = $1 ORDER BY created_at",
+            current_user.client_id,
+        )
+    return {"users": [
+        {"id": str(r["id"]), "email": r["email"], "role": r["role"],
+         "created_at": r["created_at"].isoformat() if r["created_at"] else None}
+        for r in rows
+    ]}
+
+
+@router.patch("/users/{user_id}", summary="Admin: change a teammate's role")
+async def update_user_role(
+    user_id: str,
+    body: UpdateUserRoleBody,
+    current_user: CurrentUser = Depends(require_role("admin")),
+):
+    if body.role not in ("admin", "analyst", "viewer"):
+        raise HTTPException(status_code=422, detail="role must be admin, analyst, or viewer.")
+
+    if _db.pool is None:
+        raise HTTPException(status_code=503, detail="Database unavailable.")
+
+    try:
+        uid = UUID(user_id)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Invalid user_id.")
+
+    async with _db.pool.acquire() as conn:
+        updated = await conn.fetchval(
+            "UPDATE users SET role = $1 WHERE id = $2 AND client_id = $3 RETURNING id",
+            body.role, uid, current_user.client_id,
+        )
+    if updated is None:
+        raise HTTPException(status_code=404, detail="User not found.")
+
+    await record_audit(
+        "role.change",
+        client_id=current_user.client_id,
+        actor=str(current_user.id),
+        resource=f"PATCH /auth/users/{user_id}",
+        detail={"target_user": user_id, "new_role": body.role},
+    )
+    return {"id": user_id, "role": body.role}
+
+
+@router.patch("/clients/me", summary="Admin: update organisation name")
+async def update_client(
+    body: UpdateClientBody,
+    current_user: CurrentUser = Depends(require_role("admin")),
+):
+    if _db.pool is None:
+        raise HTTPException(status_code=503, detail="Database unavailable.")
+
+    if body.name is not None:
+        name = body.name.strip()
+        if not name:
+            raise HTTPException(status_code=422, detail="name cannot be empty.")
+        async with _db.pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE clients SET name = $1 WHERE id = $2",
+                name, current_user.client_id,
+            )
+        await record_audit(
+            "client.update",
+            client_id=current_user.client_id,
+            actor=str(current_user.id),
+            resource="PATCH /auth/clients/me",
+            detail={"name": name},
+        )
+
+    async with _db.pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT name, email, plan FROM clients WHERE id = $1",
+            current_user.client_id,
+        )
+    return {"name": row["name"], "email": row["email"], "plan": row["plan"]}

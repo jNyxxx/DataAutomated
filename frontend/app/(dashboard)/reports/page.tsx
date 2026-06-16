@@ -1,117 +1,155 @@
-import { Plus, Share2, Sparkles, Clock } from "lucide-react";
-import { Badge, type BadgeProps } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { SearchInput, FilterSelect, DateRangeButton } from "@/components/ui/Field";
-import { EditionChart } from "@/components/reports/EditionChart";
-import { GeneratingReportCard } from "@/components/reports/GeneratingReportCard";
-import { DownloadPdfButton } from "@/components/reports/DownloadPdfButton";
-import { OpenFullReportButton, ShareToSlackButton, ExportAllButton } from "@/components/reports/ReportActions";
-import { focusRing } from "@/lib/utils";
-import { fetchReports } from "@/lib/api";
-import { getTokenServerSide } from "@/lib/auth";
-import { type Report } from "@/lib/types";
-import { format } from "date-fns";
+import { Clock, Sparkles } from 'lucide-react';
+import { format } from 'date-fns';
+import { getTokenServerSide } from '@/lib/auth';
+import { fetchClientInfo, fetchEditionStats, fetchInsights, fetchReports } from '@/lib/api';
+import { Badge, type BadgeProps } from '@/components/ui/badge';
+import { EditionChart } from '@/components/reports/EditionChart';
+import { GeneratingReportCard } from '@/components/reports/GeneratingReportCard';
+import { DownloadPdfButton } from '@/components/reports/DownloadPdfButton';
+import { OpenFullReportButton } from '@/components/reports/ReportActions';
+import { NewReportModal } from '@/components/reports/NewReportModal';
+import { ReportLibraryClient } from '@/components/reports/ReportLibraryClient';
+import { TemplatesSection } from '@/components/reports/TemplatesSection';
+import { type Briefing, type BriefingHighlight, type ReportStatus, type Stream } from '@/lib/export-api';
+import { type Report } from '@/lib/types';
 
-function safeFormatDate(dStr: string) {
+function safeFormatDate(dateString: string) {
   try {
-    return format(new Date(dStr), "MMM d, yyyy");
+    return format(new Date(dateString), 'MMM d, yyyy');
   } catch {
-    return dStr;
+    return dateString;
   }
 }
-import {
-  type Briefing,
-  type ReportStatus,
-  type Stream,
-} from "@/lib/export-api";
 
-/* ----------------------------- static config ----------------------------- */
+function extractTopThemes(raw: unknown, n = 3): BriefingHighlight[] {
+  try {
+    const t = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    let names: string[] = [];
+    if (Array.isArray(t)) {
+      names = t.slice(0, n).map((x: any) => x?.theme ?? x?.name ?? '').filter(Boolean);
+    } else if (t && typeof t === 'object') {
+      names = Object.keys(t).slice(0, n);
+    }
+    return names.map((text) => ({ stream: 'voc' as const, text }));
+  } catch {}
+  return [];
+}
+
+function nextMondayLabel(): string {
+  const d = new Date();
+  const daysUntil = (8 - d.getDay()) % 7 || 7;
+  d.setDate(d.getDate() + daysUntil);
+  return format(d, 'MMM d');
+}
+
+function streamFromReportType(reportType: string): Stream {
+  if (reportType === 'weekly_voc') return 'voc';
+  if (reportType === 'competitive_brief') return 'comp';
+  if (reportType === 'journey') return 'jrn';
+  return 'system';
+}
+
+function reportTitleFromType(reportType: string) {
+  if (reportType === 'weekly_voc') return 'VoC Analysis';
+  if (reportType === 'competitive_brief') return 'Competitive Brief';
+  if (reportType === 'journey') return 'Journey Report';
+  return 'Executive Weekly';
+}
 
 const STREAM_LABEL: Record<string, string> = {
-  voc: "Voice of Customer",
-  comp: "Competitive",
-  jrn: "Journey",
-  system: "Executive",
+  voc: 'Voice of Customer',
+  comp: 'Competitive',
+  jrn: 'Journey',
+  system: 'Executive',
 };
 
-const STATUS_BADGE: Record<string, { label: string; variant: BadgeProps["variant"] }> = {
-  ready: { label: "Ready", variant: "success" },
-  generating: { label: "Generating", variant: "warning" },
-  scheduled: { label: "Scheduled", variant: "neutral" },
+const STATUS_BADGE: Record<string, { label: string; variant: BadgeProps['variant'] }> = {
+  ready: { label: 'Ready', variant: 'success' },
+  generating: { label: 'Generating', variant: 'warning' },
+  scheduled: { label: 'Scheduled', variant: 'neutral' },
 };
-
-const TEMPLATES: { name: string; stream: Stream; label?: string; desc: string }[] = [
-  { name: "Executive Weekly", stream: "system", label: "All streams", desc: "Leadership briefing across all three services" },
-  { name: "VoC Deep-Dive", stream: "voc", desc: "Theme clusters, sentiment + verbatim samples" },
-  { name: "Competitive Brief", stream: "comp", desc: "Signals grouped by urgency + strategic context" },
-  { name: "Journey Funnel Review", stream: "jrn", desc: "Drop-off analysis + recommended fixes" },
-];
 
 const SCHEDULE = [
-  ["Executive Weekly", "Mon · 9:00 AM"],
-  ["Competitive digest", "Daily · 8:00 AM"],
-  ["VoC summary", "Fri · 4:00 PM"],
-  ["Board pack", "1st of month"],
+  ['Executive Weekly', 'Mon - 9:00 AM'],
+  ['Competitive digest', 'Daily - 8:00 AM'],
+  ['VoC summary', 'Fri - 4:00 PM'],
+  ['Board pack', '1st of month'],
 ];
 
-const FORMATS = ["PDF", "Slack message", "Email digest", "Notion page", "CSV data"];
-
-/* --------------------------------- page ---------------------------------- */
+const FORMATS = ['PDF', 'Email digest', 'Notion page', 'CSV data'];
 
 export default async function ReportsPage() {
   const token = getTokenServerSide()!;
-  const reportsRes = await fetchReports(token).catch(() => ({ reports: [] }));
-  const realReports = reportsRes.reports;
+  const [reportsRes, editionStats, insightsRes, clientInfo] = await Promise.all([
+    fetchReports(token).catch(() => ({ reports: [] })),
+    fetchEditionStats(token, 'last_7_days', true).catch(() => ({
+      sources: 0,
+      signals: 0,
+      pages: 0,
+      volume: [],
+    })),
+    fetchInsights(token, { limit: 1 }).catch(() => ({ insights: [], total: 0 })),
+    fetchClientInfo(token).catch(() => ({ name: '', email: '', plan: '' })),
+  ]);
+  const latestInsight = insightsRes.insights[0];
 
-  // Adapt the real backend report format to the UI component format
-  const reports = realReports.map((r: Report) => ({
-    id: r.id,
-    title: `${r.report_type === 'system' ? 'Executive' : r.report_type} Report`,
-    stream: r.report_type || "system",
-    period: r.period_start && r.period_end ? `${safeFormatDate(r.period_start)} to ${safeFormatDate(r.period_end)}` : "Monthly",
-    generated_at: r.created_at ? format(new Date(r.created_at), "MMM d, yyyy") : "Unknown",
+  const realReports = reportsRes.reports;
+  const reports = realReports.map((report: Report) => ({
+    id: report.id,
+    title: reportTitleFromType(report.report_type),
+    stream: streamFromReportType(report.report_type),
+    typeLabel: STREAM_LABEL[streamFromReportType(report.report_type)],
+    period:
+      report.period_start && report.period_end
+        ? `${safeFormatDate(report.period_start)} to ${safeFormatDate(report.period_end)}`
+        : 'Custom',
+    generated_at: report.created_at ? format(new Date(report.created_at), 'MMM d, yyyy') : 'Unknown',
     pages: null,
-    status: r.s3_key ? "ready" : "generating",
+    status: (report.s3_key ? 'ready' : 'generating') as ReportStatus,
   }));
 
   const latestReal = realReports[0];
-  const briefing: Briefing | null = latestReal ? {
-    id: latestReal.id,
-    week_label: "Latest",
-    generated_at: latestReal.created_at ? format(new Date(latestReal.created_at), "h:mm a") : "",
-    summary: "",
-    highlights: [],
-    stats: { pages: 0, sources: 0, signals: 0, period: latestReal.period_start ? `${safeFormatDate(latestReal.period_start)} to ${safeFormatDate(latestReal.period_end)}` : "" },
-    volume: [],
-    delivery: [{ name: "Leadership", role: "Channel", channel: "#exec-briefing" }],
-    next_send: "Next Monday",
-    status: latestReal.s3_key ? "ready" : "generating",
-  } : null;
+  const latestStatus: ReportStatus = latestReal?.s3_key ? 'ready' : 'generating';
+  const briefing: Briefing | null = latestReal
+    ? {
+        id: latestReal.id,
+        week_label: latestReal.period_start ? safeFormatDate(latestReal.period_start) : 'Latest',
+        generated_at: latestReal.created_at ? format(new Date(latestReal.created_at), 'h:mm a') : '',
+        summary: latestInsight?.narrative ?? '',
+        highlights: extractTopThemes(latestInsight?.themes),
+        stats: {
+          pages: editionStats.pages,
+          sources: editionStats.sources,
+          signals: editionStats.signals,
+          period:
+            latestReal.period_start && latestReal.period_end
+              ? `${safeFormatDate(latestReal.period_start)} to ${safeFormatDate(latestReal.period_end)}`
+              : '',
+        },
+        volume: editionStats.volume,
+        delivery: [{ name: clientInfo.name || 'Admin', role: 'Admin', channel: clientInfo.email }],
+        next_send: nextMondayLabel(),
+        status: latestStatus,
+      }
+    : null;
 
-  const generating = reports.find((r) => r.status === "generating");
+  const generating = reports.find((report) => report.status === 'generating');
+  const readyIds = reports.filter((report) => report.status === 'ready').map((report) => report.id);
 
   return (
     <div className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
-      {/* Header */}
       <header className="flex flex-wrap items-center gap-4">
         <div className="min-w-0">
           <h1 className="truncate text-2xl font-semibold tracking-tight text-white">Reports</h1>
           <p className="mt-0.5 truncate text-sm text-slate-400">
-            Weekly briefings + on-demand · Acme SaaS Inc.
+            Weekly briefings + on-demand - DataAutomated Demo
           </p>
         </div>
         <div className="ml-auto flex items-center gap-2">
-          <SearchInput placeholder="Search reports…" className="w-40 sm:w-56" />
-          <Button variant="primary">
-            <Plus className="size-4" />
-            New report
-          </Button>
+          <NewReportModal />
         </div>
       </header>
 
-
-
-      {/* Hero: latest briefing + side rail */}
       <div className="mt-5 grid grid-cols-1 gap-5 lg:grid-cols-3">
         <LatestBriefing briefing={briefing} />
         <div className="flex flex-col gap-5">
@@ -120,19 +158,16 @@ export default async function ReportsPage() {
         </div>
       </div>
 
-      {/* Active generation (driven by the authenticated SSE stream) */}
       {generating && (
         <div className="mt-5">
           <GeneratingReportCard reportId={generating.id} reportTitle={generating.title} />
         </div>
       )}
 
-      {/* Library */}
-      <ReportLibrary reports={reports} />
+      <ReportLibraryClient reports={reports} readyIds={readyIds} />
 
-      {/* Templates + schedule */}
       <div className="mt-5 grid grid-cols-1 gap-5 md:grid-cols-2">
-        <Templates />
+        <TemplatesSection />
         <div className="flex flex-col gap-5">
           <Schedule />
           <OutputFormats />
@@ -142,29 +177,27 @@ export default async function ReportsPage() {
   );
 }
 
-/* ------------------------------- sections -------------------------------- */
-
 function LatestBriefing({ briefing }: { briefing: Briefing | null }) {
+  const status = STATUS_BADGE[briefing?.status ?? 'scheduled'] || STATUS_BADGE.scheduled;
   return (
-    <section className="rounded-xl bg-slate-800 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.05)] p-5 lg:col-span-2">
+    <section className="rounded-xl bg-slate-800 p-5 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.05)] lg:col-span-2">
       <div className="flex flex-wrap items-center gap-3">
         <Badge variant="system" dot>
           All streams
         </Badge>
         <h2 className="text-base font-semibold text-white">Latest Briefing</h2>
         <span className="min-w-0 truncate text-sm text-slate-400">
-          {briefing ? `${briefing.week_label} · generated ${briefing.generated_at}` : "—"}
+          {briefing ? `${briefing.week_label} - generated ${briefing.generated_at}` : '-'}
         </span>
-        <Badge variant="success" dot className="ml-auto">
-          Ready
+        <Badge variant={status.variant} dot className="ml-auto">
+          {status.label}
         </Badge>
       </div>
 
       <div className="mt-4 grid grid-cols-1 gap-5 sm:grid-cols-[140px_1fr]">
-        {/* Cover */}
         <div className="hidden flex-col gap-2 rounded-lg bg-slate-900 p-4 sm:flex">
           <span className="truncate text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-            DataAutomated · Weekly
+            DataAutomated - Weekly
           </span>
           <span className="text-sm font-semibold leading-snug text-white">
             Intelligence Briefing
@@ -182,25 +215,23 @@ function LatestBriefing({ briefing }: { briefing: Briefing | null }) {
           </div>
         </div>
 
-        {/* Narrative — the core value, elevated but clamped so messy data can't break layout */}
         <div className="min-w-0">
           <div className="mb-3 flex items-center gap-2 text-xs font-medium text-blue-400">
             <Sparkles className="size-4" />
             AI executive summary
           </div>
           <p className="line-clamp-3 text-lg leading-relaxed text-slate-200">
-            {briefing?.summary ??
-              "This week's executive summary will appear here once the briefing has generated."}
+            {briefing?.summary ?? 'This week\'s executive summary will appear here once the briefing has generated.'}
           </p>
 
           <ul className="mt-4 space-y-2">
-            {(briefing?.highlights ?? []).map((h: { stream: Stream, text: string }, i: number) => (
-              <li key={i} className="flex items-start gap-3 rounded-lg bg-slate-900/50 p-3">
-                <Badge variant={h.stream} dot className="mt-0.5 shrink-0">
-                  {STREAM_LABEL[h.stream]}
+            {(briefing?.highlights ?? []).map((highlight, index) => (
+              <li key={`${highlight.stream}-${index}`} className="flex items-start gap-3 rounded-lg bg-slate-900/50 p-3">
+                <Badge variant={highlight.stream} dot className="mt-0.5 shrink-0">
+                  {STREAM_LABEL[highlight.stream]}
                 </Badge>
                 <p className="line-clamp-2 min-w-0 text-sm leading-relaxed text-slate-300">
-                  {h.text}
+                  {highlight.text}
                 </p>
               </li>
             ))}
@@ -213,7 +244,6 @@ function LatestBriefing({ briefing }: { briefing: Briefing | null }) {
           <>
             <OpenFullReportButton reportId={briefing.id} />
             <DownloadPdfButton reportId={briefing.id} />
-            <ShareToSlackButton reportId={briefing.id} />
           </>
         )}
       </div>
@@ -222,24 +252,25 @@ function LatestBriefing({ briefing }: { briefing: Briefing | null }) {
 }
 
 function EditionStats({ briefing }: { briefing: Briefing | null }) {
-  const s = briefing?.stats;
+  const stats = briefing?.stats;
   const rows: [string, string][] = [
-    ["Pages", s ? String(s.pages) : "—"],
-    ["Sources synthesized", s ? String(s.sources) : "—"],
-    ["Signals included", s ? String(s.signals) : "—"],
-    ["Period", s?.period ?? "—"],
+    ['Pages', stats ? String(stats.pages) : '-'],
+    ['Sources synthesized', stats ? String(stats.sources) : '-'],
+    ['Signals included', stats ? String(stats.signals) : '-'],
+    ['Period', stats?.period ?? '-'],
   ];
+
   return (
-    <section className="rounded-xl bg-slate-800 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.05)] p-5">
+    <section className="rounded-xl bg-slate-800 p-5 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.05)]">
       <h3 className="text-sm font-semibold text-white">This edition</h3>
       <div className="mt-3">
         <EditionChart data={briefing?.volume ?? []} />
       </div>
       <dl className="mt-2 divide-y divide-white/5">
-        {rows.map(([k, v]) => (
-          <div key={k} className="flex items-center justify-between gap-3 py-2 text-sm">
-            <dt className="truncate text-slate-400">{k}</dt>
-            <dd className="shrink-0 font-medium tabular-nums text-slate-200">{v}</dd>
+        {rows.map(([label, value]) => (
+          <div key={label} className="flex items-center justify-between gap-3 py-2 text-sm">
+            <dt className="truncate text-slate-400">{label}</dt>
+            <dd className="shrink-0 font-medium tabular-nums text-slate-200">{value}</dd>
           </div>
         ))}
       </dl>
@@ -248,115 +279,24 @@ function EditionStats({ briefing }: { briefing: Briefing | null }) {
 }
 
 function DeliveryCard({ briefing }: { briefing: Briefing | null }) {
-  const recipients = briefing?.delivery ?? [];
   return (
-    <section className="rounded-xl bg-slate-800 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.05)] p-5">
+    <section className="rounded-xl bg-slate-800 p-5 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.05)]">
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold text-white">Delivery</h3>
       </div>
-      <ul className="mt-3 space-y-2.5"></ul>
+      <ul className="mt-3 space-y-2.5">
+        {(briefing?.delivery ?? []).map((d, i) => (
+          <li key={i} className="flex items-center justify-between text-sm">
+            <span className="text-slate-300">{d.name}</span>
+            <span className="truncate text-xs text-slate-500">{d.channel}</span>
+          </li>
+        ))}
+      </ul>
       <div className="mt-3 flex items-center justify-between border-t border-white/5 pt-3 text-sm">
         <span className="flex items-center gap-2 text-slate-400">
           <Clock className="size-4" /> Next send
         </span>
-        <span className="font-medium text-slate-200">{briefing?.next_send ?? "—"}</span>
-      </div>
-    </section>
-  );
-}
-
-function ReportLibrary({ reports }: { reports: any[] }) {
-  return (
-    <section className="mt-5 rounded-xl bg-slate-800 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.05)] p-5">
-      <div className="flex items-center justify-between">
-        <div className="min-w-0">
-          <h3 className="truncate text-sm font-semibold text-white">Report Library</h3>
-          <p className="truncate text-xs text-slate-400">Generated + scheduled</p>
-        </div>
-        <ExportAllButton />
-      </div>
-
-      {/* Horizontal scroll keeps the table usable on mobile without a redesign. */}
-      <div className="mt-4 -mx-2 overflow-x-auto px-2">
-        <table className="w-full min-w-[640px] border-separate border-spacing-0 text-sm">
-          <thead>
-            <tr className="text-left text-xs font-medium uppercase tracking-wider text-slate-400">
-              <th className="px-3 py-2 font-medium">Report</th>
-              <th className="px-3 py-2 font-medium">Type</th>
-              <th className="px-3 py-2 font-medium">Period</th>
-              <th className="px-3 py-2 font-medium">Generated</th>
-              <th className="px-3 py-2 text-right font-medium">Pages</th>
-              <th className="px-3 py-2 font-medium">Status</th>
-              <th className="px-3 py-2" />
-            </tr>
-          </thead>
-          <tbody className="[&>tr]:border-t [&>tr]:border-white/5">
-            {reports.map((r: any) => {
-              const s = STATUS_BADGE[r.status] || STATUS_BADGE.ready;
-              return (
-                <tr key={r.id} className="group transition-colors hover:bg-slate-700/30">
-                  <td className="max-w-[260px] px-3 py-3">
-                    <span className="block truncate font-medium text-slate-100">{r.title}</span>
-                  </td>
-                  <td className="px-3 py-3">
-                    <Badge variant={r.stream} dot>
-                      {STREAM_LABEL[r.stream] || r.stream}
-                    </Badge>
-                  </td>
-                  <td className="whitespace-nowrap px-3 py-3 text-slate-400">{r.period}</td>
-                  <td className="whitespace-nowrap px-3 py-3 text-slate-400">{r.generated_at}</td>
-                  <td className="px-3 py-3 text-right tabular-nums text-slate-300">
-                    {r.pages ?? "—"}
-                  </td>
-                  <td className="px-3 py-3">
-                    <Badge variant={s.variant} dot>
-                      {s.label}
-                    </Badge>
-                  </td>
-                  <td className="px-3 py-3 text-right">
-                    {r.status === "ready" ? (
-                      <div className="flex justify-end gap-3">
-                        <button className={`rounded text-xs font-medium text-blue-400 hover:text-blue-300 ${focusRing}`}>
-                          View
-                        </button>
-                        <DownloadPdfButton reportId={r.id} label="PDF" variant="ghost" size="sm" />
-                      </div>
-                    ) : r.status === "generating" ? (
-                      <span className="text-xs text-slate-400">~2 min</span>
-                    ) : null}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-    </section>
-  );
-}
-
-function Templates() {
-  return (
-    <section className="rounded-xl bg-slate-800 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.05)] p-5">
-      <div className="flex items-center justify-between">
-        <div className="min-w-0">
-          <h3 className="truncate text-sm font-semibold text-white">Report Templates</h3>
-          <p className="truncate text-xs text-slate-400">Start from a structure</p>
-        </div>
-      </div>
-      <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
-        {TEMPLATES.map((t) => (
-          <div key={t.name} className="flex flex-col gap-2.5 rounded-lg bg-slate-900/50 p-4">
-            <Badge variant={t.stream} dot className="max-w-full self-start">
-              <span className="truncate">{t.label ?? STREAM_LABEL[t.stream]}</span>
-            </Badge>
-            <p className="truncate text-sm font-medium text-slate-100">{t.name}</p>
-            <p className="line-clamp-2 text-xs leading-relaxed text-slate-400">{t.desc}</p>
-            <Button variant="default" size="sm" className="mt-1 self-start">
-              Use template
-            </Button>
-          </div>
-        ))}
+        <span className="font-medium text-slate-200">{briefing?.next_send ?? '-'}</span>
       </div>
     </section>
   );
@@ -364,15 +304,15 @@ function Templates() {
 
 function Schedule() {
   return (
-    <section className="rounded-xl bg-slate-800 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.05)] p-5">
+    <section className="rounded-xl bg-slate-800 p-5 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.05)]">
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold text-white">Schedule</h3>
       </div>
       <dl className="mt-3 divide-y divide-white/5">
-        {SCHEDULE.map(([k, v]) => (
-          <div key={k} className="flex items-center justify-between gap-3 py-2 text-sm">
-            <dt className="truncate text-slate-400">{k}</dt>
-            <dd className="shrink-0 font-medium text-slate-200">{v}</dd>
+        {SCHEDULE.map(([label, value]) => (
+          <div key={label} className="flex items-center justify-between gap-3 py-2 text-sm">
+            <dt className="truncate text-slate-400">{label}</dt>
+            <dd className="shrink-0 font-medium text-slate-200">{value}</dd>
           </div>
         ))}
       </dl>
@@ -382,23 +322,23 @@ function Schedule() {
 
 function OutputFormats() {
   return (
-    <section className="rounded-xl bg-slate-800 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.05)] p-5">
+    <section className="rounded-xl bg-slate-800 p-5 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.05)]">
       <h3 className="text-sm font-semibold text-white">Output formats</h3>
       <div className="mt-3 flex flex-wrap gap-2">
-        {FORMATS.map((f, i) => (
+        {FORMATS.map((formatLabel, index) => (
           <span
-            key={f}
+            key={formatLabel}
             className={
-              i < 2
-                ? "rounded-full bg-blue-500/10 px-3 py-1 text-xs font-medium text-blue-300"
-                : "rounded-full bg-slate-700/40 px-3 py-1 text-xs font-medium text-slate-400"
+              index < 2
+                ? 'rounded-full bg-blue-500/10 px-3 py-1 text-xs font-medium text-blue-300'
+                : 'rounded-full bg-slate-700/40 px-3 py-1 text-xs font-medium text-slate-400'
             }
           >
-            {f}
+            {formatLabel}
           </span>
         ))}
       </div>
-      <p className="mt-3 text-xs text-slate-400">PDF + Slack are the active delivery formats.</p>
+      <p className="mt-3 text-xs text-slate-400">PDF and email digest are the active delivery formats.</p>
     </section>
   );
 }

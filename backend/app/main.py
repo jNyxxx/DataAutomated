@@ -15,8 +15,6 @@ Routers included (CLAUDE.md §10 prefixes / tags):
 from __future__ import annotations
 
 import logging
-import time
-from collections import defaultdict
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -32,10 +30,85 @@ from app.services.audit_service import record_audit
 logger = logging.getLogger(__name__)
 
 
+async def _run_migrations() -> None:
+    """Run `alembic upgrade head` as a subprocess before the pool opens.
+
+    In development, a failed migration logs a warning and continues so the app
+    still starts. In production, a failure raises (fail-loud, per §7).
+    """
+    import asyncio as _aio
+
+    proc = await _aio.create_subprocess_exec(
+        "alembic", "-c", "/app/alembic.ini", "upgrade", "head",
+        stdout=_aio.subprocess.PIPE,
+        stderr=_aio.subprocess.PIPE,
+    )
+    stdout, stderr = await proc.communicate()
+    msg = (stdout.decode().strip() or "already up-to-date")
+    if proc.returncode != 0:
+        err = stderr.decode().strip()
+        if settings.app_env == "production":
+            raise RuntimeError(f"Migrations failed in production — refusing to start:\n{err}")
+        logger.warning("Migrations failed (dev mode — continuing): %s", err)
+    else:
+        logger.info("migrations: %s", msg)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    if settings.run_migrations_on_startup:
+        await _run_migrations()
     await init_pool()
+    # Boot trigger — immediately dispatch ingestion + agents for all active clients.
+    # Fire-and-forget: errors are logged inside; startup health check is unaffected.
+    # Works identically on docker-compose (local) and AWS ECS Fargate (§15).
+    import asyncio as _asyncio
+    from app.services.startup_service import trigger_all_active_clients
+    _asyncio.create_task(trigger_all_active_clients())
+    # Ensure the reports bucket exists in MinIO (local dev only; no-op in production
+    # where S3_ENDPOINT_URL is blank and the real bucket is pre-created in AWS).
+    if settings.s3_endpoint_url:
+        try:
+            import boto3 as _boto3
+            from botocore.config import Config as _BotoConfig
+            from botocore.exceptions import ClientError as _CE
+            _s3 = _boto3.client(
+                "s3",
+                endpoint_url=settings.s3_endpoint_url,
+                aws_access_key_id=settings.s3_access_key_id or None,
+                aws_secret_access_key=settings.s3_secret_access_key or None,
+                region_name=settings.aws_region,
+                config=_BotoConfig(signature_version="s3v4", s3={"addressing_style": "path"}),
+            )
+            try:
+                _s3.head_bucket(Bucket=settings.s3_reports_bucket)
+            except _CE as _e:
+                if _e.response["Error"]["Code"] in ("404", "NoSuchBucket"):
+                    _s3.create_bucket(Bucket=settings.s3_reports_bucket)
+                    logger.info("minio bucket created: %s", settings.s3_reports_bucket)
+                else:
+                    raise
+        except Exception as _exc:
+            logger.warning("minio bucket init failed (will retry on next boot): %s", _exc)
+    # Retry sweeper — re-dispatch failed agent jobs every 120s (Phase 6 DLQ).
+    # Runs as a background task; errors are logged inside sweep_failed_jobs and
+    # never kill the application. The loop exits cleanly when the task is cancelled
+    # on shutdown (CancelledError propagates out of asyncio.sleep).
+    async def _sweep_loop():
+        from app.services.job_service import sweep_failed_jobs
+        while True:
+            try:
+                await _asyncio.sleep(120)
+                await sweep_failed_jobs()
+            except _asyncio.CancelledError:
+                break
+            except Exception as _exc:
+                logger.warning("job sweep loop error: %s", _exc)
+
+    _sweep_task = _asyncio.create_task(_sweep_loop(), name="job_sweep_loop")
+
     yield
+    _sweep_task.cancel()
     await close_pool()
 
 
@@ -119,10 +192,8 @@ class AuditMiddleware:
 # Security middleware (CLAUDE.md §2, §14)
 # ---------------------------------------------------------------------------
 
-# In-process rate limiter (per IP, per path prefix).
-# NOTE: per-instance only — at 2–10 ECS tasks, limits apply independently.
-# Production-grade distributed rate limiting requires AWS WAF (deferred).
-_rate_limit_store: dict[str, list[float]] = defaultdict(list)
+# Distributed rate limiter (per IP, per path prefix) — backed by PostgreSQL.
+# Correct across all ECS task instances. See services/rate_limit_service.py.
 _RATE_LIMIT_RULES: dict[str, tuple[int, int]] = {
     # path_prefix: (max_requests, window_seconds)
     "/auth/token": (10, 60),
@@ -130,6 +201,11 @@ _RATE_LIMIT_RULES: dict[str, tuple[int, int]] = {
     "/webhook/typeform": (60, 60),
     "/webhook/intercom": (60, 60),
 }
+
+# Per-client API rate limit applied to authenticated endpoints (production only).
+# Key = "client:{client_id}" bucketed per 60-second window.
+_CLIENT_API_RATE_LIMIT: tuple[int, int] = (300, 60)   # 300 req / 60 s per client
+_CLIENT_API_PATHS = ("/insights/", "/signals/", "/journeys/", "/api/")
 
 
 class SecurityMiddleware:
@@ -161,26 +237,44 @@ class SecurityMiddleware:
         except (ValueError, TypeError):
             pass
 
-        # ---- 2. Per-IP rate limiting (production only) ----
-        for prefix, (max_req, window) in _RATE_LIMIT_RULES.items():
-            if settings.app_env != "production":
-                break
-            if path.startswith(prefix):
-                client_ip = scope.get("client", ("unknown", 0))[0]
-                key = f"{client_ip}:{prefix}"
-                now = time.monotonic()
-                hits = _rate_limit_store[key]
-                _rate_limit_store[key] = [t for t in hits if now - t < window]
-                if len(_rate_limit_store[key]) >= max_req:
-                    await send({
-                        "type": "http.response.start",
-                        "status": 429,
-                        "headers": [(b"content-length", b"0"), (b"retry-after", str(window).encode())],
-                    })
-                    await send({"type": "http.response.body", "body": b""})
-                    return
-                _rate_limit_store[key].append(now)
-                break
+        # ---- 2. Distributed rate limiting (production only, Postgres-backed) ----
+        if settings.app_env == "production":
+            # 2a. Per-IP limits on sensitive path prefixes
+            for prefix, (max_req, window) in _RATE_LIMIT_RULES.items():
+                if path.startswith(prefix):
+                    from app.services.rate_limit_service import check_rate_limit
+                    client_ip = scope.get("client", ("unknown", 0))[0]
+                    try:
+                        allowed = await check_rate_limit(f"{client_ip}:{prefix}", max_req, window)
+                    except Exception:
+                        allowed = True  # fail open — don't block traffic on DB outage
+                    if not allowed:
+                        await send({
+                            "type": "http.response.start",
+                            "status": 429,
+                            "headers": [(b"content-length", b"0"), (b"retry-after", str(window).encode())],
+                        })
+                        await send({"type": "http.response.body", "body": b""})
+                        return
+                    break
+            # 2b. Per-client limits on authenticated API paths
+            if any(path.startswith(p) for p in _CLIENT_API_PATHS):
+                _, client_id = _audit_identity(scope)
+                if client_id:
+                    from app.services.rate_limit_service import check_rate_limit
+                    max_req, window = _CLIENT_API_RATE_LIMIT
+                    try:
+                        allowed = await check_rate_limit(f"client:{client_id}", max_req, window)
+                    except Exception:
+                        allowed = True
+                    if not allowed:
+                        await send({
+                            "type": "http.response.start",
+                            "status": 429,
+                            "headers": [(b"content-length", b"0"), (b"retry-after", b"60")],
+                        })
+                        await send({"type": "http.response.body", "body": b""})
+                        return
 
         # ---- 3. Security response headers ----
         async def _send_with_headers(message):
@@ -199,6 +293,33 @@ class SecurityMiddleware:
             await send(message)
 
         await self.app(scope, receive, _send_with_headers)
+
+
+# ---------------------------------------------------------------------------
+# Sentry — env-gated error tracking (P11). Inert locally; activated in production
+# by setting SENTRY_DSN. Must be initialised before the FastAPI app object is created
+# so the Starlette/FastAPI integrations register their middleware automatically.
+# send_default_pii=False honours GDPR §14; traces_sample_rate=0.1 limits volume.
+# ---------------------------------------------------------------------------
+
+if settings.sentry_dsn:
+    try:
+        import sentry_sdk
+        from sentry_sdk.integrations.fastapi import FastApiIntegration
+        from sentry_sdk.integrations.starlette import StarletteIntegration
+        sentry_sdk.init(
+            dsn=settings.sentry_dsn,
+            environment=settings.app_env,
+            integrations=[
+                StarletteIntegration(transaction_style="endpoint"),
+                FastApiIntegration(),
+            ],
+            traces_sample_rate=0.1,
+            send_default_pii=False,
+        )
+        logger.info("sentry: initialized (env=%s)", settings.app_env)
+    except Exception as _sentry_exc:
+        logger.warning("sentry: init failed (non-fatal): %s", _sentry_exc)
 
 
 # ---------------------------------------------------------------------------

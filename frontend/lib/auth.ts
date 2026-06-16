@@ -28,8 +28,23 @@ export function isTokenExpired(token: string): boolean {
   }
 }
 
+export function getUserRoleFromToken(token: string): 'admin' | 'analyst' | 'viewer' {
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1]));
+    const role = payload.role;
+    if (role === 'admin' || role === 'analyst' || role === 'viewer') return role;
+    return 'viewer'; // fail closed — least-privileged for unknown/missing role
+  } catch {
+    return 'viewer';
+  }
+}
+
 export async function getCurrentUser(token: string): Promise<User | null> {
-  const baseUrl = process.env.API_URL_INTERNAL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
+  const configured = process.env.API_URL_INTERNAL ?? process.env.NEXT_PUBLIC_API_URL;
+  if (!configured && process.env.NODE_ENV === 'production') {
+    throw new Error('API_URL_INTERNAL and NEXT_PUBLIC_API_URL are not set — refusing to fall back to localhost in production.');
+  }
+  const baseUrl = configured ?? 'http://localhost:8000';
   try {
     const res = await fetch(`${baseUrl}/auth/me`, {
       headers: { Authorization: `Bearer ${token}` },

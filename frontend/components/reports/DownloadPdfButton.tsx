@@ -3,7 +3,7 @@
 import * as React from "react";
 import { Download } from "lucide-react";
 import { Button, type ButtonProps } from "@/components/ui/button";
-import { getDownloadUrlAction } from "@/app/(dashboard)/reports/actions";
+import { useToast } from "@/components/ui/Toast";
 
 /**
  * Resolves the S3-signed PDF URL on click (async) and shows a loading state
@@ -22,15 +22,16 @@ export function DownloadPdfButton({
   size?: ButtonProps["size"];
   className?: string;
 }) {
+  const { toast } = useToast();
   const [loading, setLoading] = React.useState(false);
+  const downloadUrl = `/api/reports/${reportId}/file?download=1`;
 
   const onClick = async () => {
     setLoading(true);
     try {
-      const { url } = await getDownloadUrlAction(reportId);
-      window.open(url, "_blank", "noopener,noreferrer");
-    } catch {
-      // Surfaced globally via AlertBanner / toast in the host app.
+      window.open(downloadUrl, "_blank", "noopener,noreferrer");
+    } catch (err: any) {
+      toast(err?.message || "Failed to download report", "error");
     } finally {
       setLoading(false);
     }

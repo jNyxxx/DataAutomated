@@ -15,6 +15,7 @@ No agent run may block an HTTP request (CLAUDE.md §10 background task rule).
 from __future__ import annotations
 
 import asyncio
+import datetime as _dt
 import json
 import logging
 import secrets as _secrets
@@ -38,6 +39,29 @@ from app.routers.auth import (
 
 logger = logging.getLogger("dataautomated")
 
+
+def _row_dict(row) -> dict:
+    """
+    Convert an asyncpg Record to a JSON-safe dict with correct types.
+    - datetimes → ISO 8601 string with T (not Python's space-separated repr)
+    - UUIDs → str
+    - booleans, ints, floats → kept as-is (NOT stringified)
+    The blanket `str(v)` pattern breaks Safari's Date parser and returns
+    numeric fields as strings instead of numbers.
+    """
+    result = {}
+    for k, v in dict(row).items():
+        if v is None:
+            result[k] = None
+        elif isinstance(v, (_dt.datetime, _dt.date)):
+            result[k] = v.isoformat()
+        elif isinstance(v, UUID):
+            result[k] = str(v)
+        else:
+            result[k] = v  # int, float, bool, str — kept as-is
+    return result
+
+
 # Primary router — prefix /insights
 router = APIRouter(prefix="/insights", tags=["VoC Insights"])
 
@@ -59,15 +83,13 @@ _SSE_TICKET_TTL = 60
 # ---------------------------------------------------------------------------
 
 async def _run_voc_analysis(client_id: UUID) -> None:
-    """Dispatch the VoC LangGraph agent. Background tasks must not propagate exceptions."""
+    """Dispatch the VoC LangGraph agent with job lifecycle tracking."""
     if not settings.openai_api_key:
         logger.warning("OPENAI_API_KEY not configured; VoC agent skipped for client %s", client_id)
         return
-    try:
-        from app.agents.voc_agent import run_voc_analysis
-        await run_voc_analysis(client_id)
-    except Exception:
-        logger.exception("VoC agent run failed for client %s", client_id)
+    from app.services.job_service import run_tracked
+    from app.agents.voc_agent import run_voc_analysis
+    await run_tracked(client_id, "voc", run_voc_analysis(client_id))
 
 
 # ---------------------------------------------------------------------------
@@ -121,10 +143,7 @@ async def list_insights(
             offset,
         )
     return {
-        "insights": [
-            {k: str(v) if v is not None else None for k, v in dict(r).items()}
-            for r in rows
-        ],
+        "insights": [_row_dict(r) for r in rows],
         "total": total or 0,
     }
 
@@ -146,7 +165,39 @@ async def latest(current_user: CurrentUser = Depends(get_current_user)):
         )
     if row is None:
         return {"insight": None}
-    return {"insight": {k: str(v) if v is not None else None for k, v in dict(row).items()}}
+    return {"insight": _row_dict(row)}
+
+
+@router.get("/feedback-samples", summary="Recent raw feedback samples for the caller's client")
+async def feedback_samples(
+    limit: int = Query(default=10, ge=1, le=50),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """
+    Returns the most recent raw_feedback rows for the authenticated client.
+    Tenant-scoped via RLS + explicit WHERE (§6). Content is returned as-is;
+    the UI truncates for display.
+    """
+    async with acquire_for_client(current_user.client_id) as conn:
+        rows = await conn.fetch(
+            "SELECT id, source_type, content, ingested_at "
+            "FROM raw_feedback "
+            "WHERE client_id = $1 AND source_type != 'custom' "
+            "ORDER BY ingested_at DESC LIMIT $2",
+            current_user.client_id,
+            limit,
+        )
+    return {
+        "samples": [
+            {
+                "id": str(r["id"]),
+                "source_type": r["source_type"],
+                "content": r["content"],
+                "ingested_at": r["ingested_at"].isoformat() if r["ingested_at"] else None,
+            }
+            for r in rows
+        ]
+    }
 
 
 @router.get("/{insight_id}", summary="Single VoC insight by ID")
@@ -169,7 +220,7 @@ async def get_insight(
         )
     if row is None:
         raise HTTPException(status_code=404, detail="Insight not found.")
-    return {"insight": {k: str(v) if v is not None else None for k, v in dict(row).items()}}
+    return {"insight": _row_dict(row)}
 
 
 # ---------------------------------------------------------------------------
@@ -214,6 +265,18 @@ async def _fetch_journeys_since(conn, client_id: UUID, since) -> list:
         "FROM journey_insights "
         "WHERE client_id = $1 AND created_at > $2 "
         "ORDER BY created_at ASC",
+        client_id, since,
+    )
+
+
+async def _fetch_jobs_since(conn, client_id: UUID, since) -> list:
+    """Terminal agent_jobs (succeeded/failed/dead) completed strictly after `since`, oldest-first."""
+    return await conn.fetch(
+        "SELECT id, job_type, status, last_error, completed_at "
+        "FROM agent_jobs "
+        "WHERE client_id = $1 AND completed_at > $2 "
+        "  AND status IN ('succeeded', 'failed', 'dead') "
+        "ORDER BY completed_at ASC",
         client_id, since,
     )
 
@@ -286,25 +349,35 @@ async def stream_insights(
                 "SELECT COALESCE(MAX(created_at), NOW()) FROM journey_insights WHERE client_id = $1",
                 client_id,
             )
+            last_job = await conn.fetchval(
+                "SELECT COALESCE(MAX(completed_at), NOW()) FROM agent_jobs WHERE client_id = $1",
+                client_id,
+            )
         while True:
             async with acquire_for_client(client_id) as conn:
                 insight_rows = await _fetch_insights_since(conn, client_id, last_insight)
                 signal_rows  = await _fetch_signals_since(conn, client_id, last_signal)
                 journey_rows = await _fetch_journeys_since(conn, client_id, last_journey)
+                job_rows     = await _fetch_jobs_since(conn, client_id, last_job)
             for row in insight_rows:
                 last_insight = row["created_at"]
-                payload = {k: str(v) if v is not None else None for k, v in dict(row).items()}
+                payload = _row_dict(row)
                 payload["event_type"] = "insight"
                 yield f"data: {json.dumps(payload)}\n\n"
             for row in signal_rows:
                 last_signal = row["detected_at"]
-                payload = {k: str(v) if v is not None else None for k, v in dict(row).items()}
+                payload = _row_dict(row)
                 payload["event_type"] = "signal"
                 yield f"data: {json.dumps(payload)}\n\n"
             for row in journey_rows:
                 last_journey = row["created_at"]
-                payload = {k: str(v) if v is not None else None for k, v in dict(row).items()}
+                payload = _row_dict(row)
                 payload["event_type"] = "journey"
+                yield f"data: {json.dumps(payload)}\n\n"
+            for row in job_rows:
+                last_job = row["completed_at"]
+                payload = _row_dict(row)
+                payload["event_type"] = "job"
                 yield f"data: {json.dumps(payload)}\n\n"
             await asyncio.sleep(5)
 

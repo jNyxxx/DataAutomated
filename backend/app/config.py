@@ -61,6 +61,14 @@ class Settings(BaseSettings):
     langchain_tracing_v2: bool = True
     langchain_api_key: str = ""
     langchain_project: str = "dataautomated-dev"
+    # Org-scoped service keys require a workspace binding; without it LangSmith returns
+    # 403 on workspace endpoints (/sessions). Find via GET /api/v1/workspaces or the UI.
+    langsmith_workspace_id: str = ""
+
+    # ---- Observability — Sentry (P11 — env-gated; inert when blank) ----
+    # Set SENTRY_DSN in production ECS task env / Secrets Manager to enable error tracking.
+    # SDK init is guarded at runtime so a blank DSN is a safe no-op (never raises).
+    sentry_dsn: str = ""
 
     # ---- Vendor webhook HMAC secrets ----
     # In production: blank → reject (fail-closed). In development: blank → warn + allow.
@@ -68,15 +76,35 @@ class Settings(BaseSettings):
     typeform_webhook_secret: str = ""
     intercom_webhook_secret: str = ""
 
+    # ---- Startup behaviour ----
+    # Set to False in production if you run migrations as a separate ECS run-task.
+    run_migrations_on_startup: bool = True
+
     # ---- n8n / delivery / AWS (P6/P9) ----
     n8n_webhook_url: str = ""  # e.g. http://n8n:5678 inside compose; blank disables dispatch
     n8n_webhook_secret: str = ""
     resend_api_key: str = ""
+    resend_domain: str = ""         # e.g. mail.dataautomated.io — required for production email
+    resend_from_email: str = ""     # overrides noreply@{resend_domain} if set
+    frontend_url: str = "http://localhost:3000"  # used to build invite/reset links
     aws_region: str = "us-east-1"
     s3_reports_bucket: str = "dataautomated-reports"
     # Local S3 substitute only (minio in docker-compose). Leave blank/unset in production —
     # the real AWS SDK credential chain is used when this is None.
     s3_endpoint_url: str | None = None
+    # Browser-accessible URL for MinIO presigned links. When set, the internal Docker
+    # hostname in presigned URLs is rewritten to this value so browsers can reach them.
+    # Example: http://localhost:9000  (set when S3_ENDPOINT_URL=http://minio:9000)
+    s3_public_endpoint_url: str | None = None
+    # Explicit S3/MinIO credentials. When blank, boto3 uses the default credential chain
+    # (AWS_ACCESS_KEY_ID env var, instance role, etc.). Set for local MinIO: minioadmin.
+    s3_access_key_id: str = ""
+    s3_secret_access_key: str = ""
+
+    # ---- Secrets backend (SR-03) ----
+    # 'env'  = read from environment (default, local testing).
+    # 'aws'  = read from AWS Secrets Manager (production, when LOCAL-ONLY mode is lifted).
+    secrets_backend: str = "env"
 
     # ---- HTTP security ----
     # Comma-separated allowed hosts for TrustedHostMiddleware (empty = allow all).
