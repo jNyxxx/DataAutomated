@@ -49,10 +49,9 @@ export async function createConnectionAction(
   const token = await getTokenServerSide();
   if (!token) throw new Error("Unauthorized");
   const source = await createDataSource(token, { source_type: sourceType, credentials, config }, true);
-  try {
-    await testDataSource(token, source.id, true);
-  } catch (e) {
-    // If test fails, the backend already updates the status to failed
+  const res = await testDataSource(token, source.id, true);
+  if (res.connection_status === 'failed') {
+    throw new Error(res.error || 'Connection failed during test.');
   }
   revalidatePath("/settings");
   return source;
