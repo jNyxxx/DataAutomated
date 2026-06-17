@@ -221,6 +221,7 @@ async def update_data_source(
 @router.post("/api/data-sources/{source_id}/test", status_code=200)
 async def test_data_source_connection(
     source_id: str,
+    background_tasks: BackgroundTasks,
     current_user: CurrentUser = Depends(require_role("admin")),
 ):
     """
@@ -289,6 +290,7 @@ async def test_data_source_connection(
                    WHERE id = $1 AND client_id = $2""",
                 source_uuid, current_user.client_id,
             )
+            background_tasks.add_task(_auto_ingest_and_analyze, client_id=current_user.client_id)
             logger.info(
                 '{"event":"datasource.test.pass","source_id":"%s","source_type":"%s"}',
                 source_id, source_type,
