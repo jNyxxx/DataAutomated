@@ -59,6 +59,19 @@ async def lifespan(app: FastAPI):
     if settings.run_migrations_on_startup:
         await _run_migrations()
     await init_pool()
+    # LangSmith startup banner — confirms whether agent observability is active.
+    if settings.langchain_api_key:
+        _ws = (
+            f" · workspace {settings.langsmith_workspace_id}"
+            if settings.langsmith_workspace_id
+            else " · LANGSMITH_WORKSPACE_ID not set — workspace-scoped traces may 403"
+        )
+        logger.info("LangSmith tracing active — project: %s%s", settings.langchain_project, _ws)
+    else:
+        logger.warning(
+            "LangSmith tracing disabled — set LANGCHAIN_API_KEY + LANGSMITH_WORKSPACE_ID "
+            "in .env and restart to enable agent observability (CLAUDE.md §16)"
+        )
     # Boot trigger — immediately dispatch ingestion + agents for all active clients.
     # Fire-and-forget: errors are logged inside; startup health check is unaffected.
     # Works identically on docker-compose (local) and AWS ECS Fargate (§15).

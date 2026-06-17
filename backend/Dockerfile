@@ -10,6 +10,7 @@ WORKDIR /app
 
 # WeasyPrint (PDF reports) needs Pango/HarfBuzz native libs + fonts (CLAUDE.md §13 W3).
 RUN apt-get update && apt-get install -y --no-install-recommends \
+        curl \
         libpango-1.0-0 \
         libpangoft2-1.0-0 \
         libharfbuzz-subset0 \
@@ -31,6 +32,9 @@ COPY alembic.ini .
 COPY alembic ./alembic
 
 EXPOSE 8000
+
+HEALTHCHECK --interval=10s --timeout=5s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
 
 # Local dev overrides this with --reload via docker-compose; prod uses --workers.
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
