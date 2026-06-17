@@ -242,7 +242,7 @@ jobs:
           echo "Migration completed successfully."
 
       - name: Deploy backend to ECS
-        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
         with:
           task-definition:  ${{ steps.render-backend.outputs.task-definition }}
           service:          dataautomated-backend
@@ -250,7 +250,7 @@ jobs:
           wait-for-service-stability: true
 
       - name: Deploy frontend to ECS
-        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
         with:
           task-definition:  ${{ steps.render-frontend.outputs.task-definition }}
           service:          dataautomated-frontend
