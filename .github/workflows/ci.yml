@@ -132,7 +132,7 @@ jobs:
         run: |
           pip install pip-audit
           pip install -r backend/requirements.txt
-          pip-audit -r backend/requirements.txt --min-severity high
+          pip-audit -r backend/requirements.txt
 
   sast:
     name: Static analysis (Bandit)
