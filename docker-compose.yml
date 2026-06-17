@@ -85,7 +85,7 @@ services:
     # || true ensures n8n starts even if no workflows exist yet.
     entrypoint: /bin/sh
     command: >
-      -c "n8n import:workflow --separate --input=/workflows/ || true && exec n8n"
+      -c "n8n import:workflow --separate --input=/workflows/ || true && n8n update:workflow --id=wf-daily-feedback-ingestion --active=true || true && n8n update:workflow --id=wf-competitive-signal-monitor --active=true || true && n8n update:workflow --id=wf-weekly-report-generation --active=true || true && n8n update:workflow --id=wf-churn-alert-webhook --active=true || true && exec n8n"
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:5678/healthz || exit 1"]
       interval: 10s

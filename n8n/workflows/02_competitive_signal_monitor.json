@@ -1,5 +1,5 @@
 {
-  "name": "02 — Competitive Signal Monitor",
+  "name": "02 - Competitive Signal Monitor",
   "nodes": [
     {
       "parameters": {
@@ -154,28 +154,33 @@
     },
     {
       "parameters": {
-        "select": "channel",
-        "channelId": {
-          "__rl": true,
-          "value": "#client-alerts",
-          "mode": "name"
+        "method": "POST",
+        "url": "https://slack.com/api/chat.postMessage",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$env.SLACK_BOT_TOKEN}}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
         },
-        "messageType": "block",
-        "blocksUi": "={{ JSON.stringify([\n  { type: 'header', text: { type: 'plain_text', text: '🚨 Critical Competitive Signal' } },\n  { type: 'section', fields: [\n    { type: 'mrkdwn', text: '*Competitor:*\\n' + ($json.competitor_name || '—') },\n    { type: 'mrkdwn', text: '*Type:*\\n' + ($json.signal_type || '—') },\n    { type: 'mrkdwn', text: '*Client:*\\n' + ($('Split Clients').item.json.name || '—') },\n    { type: 'mrkdwn', text: '*Source:*\\n' + ($json.signal_source || '—') }\n  ] },\n  { type: 'section', text: { type: 'mrkdwn', text: '*Strategic Context:*\\n' + ($json.strategic_context || '—') } }\n]) }}",
-        "otherOptions": {}
+        "sendBody": true,
+        "bodyContentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  channel: '#client-alerts',\n  text: 'Critical competitive signal for ' + (($('Split Clients').item.json.name || 'unknown client')) + ': competitor=' + ($json.competitor_name || 'unknown') + ', type=' + ($json.signal_type || 'unknown') + ', source=' + ($json.signal_source || 'unknown') + '. Strategic context: ' + ($json.strategic_context || 'none provided')\n}) }}",
+        "options": {}
       },
       "id": "a2b3c4d5-0002-0002-0002-000000000008",
       "name": "Slack Alert",
-      "type": "n8n-nodes-base.slack",
-      "typeVersion": 2.2,
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
       "position": [1780, 180],
-      "onError": "continueRegularOutput",
-      "credentials": {
-        "slackApi": {
-          "id": "dataautomated-slack-prod",
-          "name": "DataAutomated Slack"
-        }
-      }
+      "onError": "continueRegularOutput"
     },
     {
       "parameters": {
@@ -197,7 +202,7 @@
         "sendBody": true,
         "bodyContentType": "json",
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({\n  from: 'DataAutomated <alerts@dataautomated.io>',\n  to: [$('Split Clients').item.json.email || 'team@dataautomated.io'],\n  subject: '🚨 Critical Competitive Signal: ' + $json.competitor_name,\n  html: '<h2>Critical Competitive Signal Detected</h2><p><strong>Competitor:</strong> ' + $json.competitor_name + '</p><p><strong>Signal Type:</strong> ' + $json.signal_type + '</p><p><strong>Strategic Context:</strong><br>' + $json.strategic_context + '</p><p>Log in to your DataAutomated dashboard to view the full analysis.</p>'\n}) }}",
+        "jsonBody": "={{ JSON.stringify({\n  from: 'DataAutomated <alerts@dataautomated.io>',\n  to: [$('Split Clients').item.json.email || 'team@dataautomated.io'],\n  subject: 'Critical Competitive Signal: ' + $json.competitor_name,\n  html: '<h2>Critical Competitive Signal Detected</h2><p><strong>Competitor:</strong> ' + $json.competitor_name + '</p><p><strong>Signal Type:</strong> ' + $json.signal_type + '</p><p><strong>Strategic Context:</strong><br>' + $json.strategic_context + '</p><p>Log in to your local DataAutomated dashboard to view the full analysis.</p><p><a href=\"http://localhost:3000/signals\" style=\"background:#111827;color:white;padding:12px 24px;border-radius:6px;text-decoration:none;display:inline-block;\">View Signals</a></p>'\n}) }}",
         "options": {}
       },
       "id": "a2b3c4d5-0002-0002-0002-000000000009",
@@ -218,41 +223,91 @@
   "connections": {
     "Every 2 Hours": {
       "main": [
-        [{"node": "Get Monitoring Clients", "type": "main", "index": 0}]
+        [
+          {
+            "node": "Get Monitoring Clients",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Get Monitoring Clients": {
       "main": [
-        [{"node": "Split Clients", "type": "main", "index": 0}]
+        [
+          {
+            "node": "Split Clients",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Split Clients": {
       "main": [
-        [{"node": "Run CompSig Agent", "type": "main", "index": 0}]
+        [
+          {
+            "node": "Run CompSig Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Run CompSig Agent": {
       "main": [
-        [{"node": "Fetch Latest Signals", "type": "main", "index": 0}]
+        [
+          {
+            "node": "Fetch Latest Signals",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Fetch Latest Signals": {
       "main": [
-        [{"node": "Split Signals", "type": "main", "index": 0}]
+        [
+          {
+            "node": "Split Signals",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Split Signals": {
       "main": [
-        [{"node": "Is Critical & Unread?", "type": "main", "index": 0}]
+        [
+          {
+            "node": "Is Critical & Unread?",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Is Critical & Unread?": {
       "main": [
         [
-          {"node": "Slack Alert", "type": "main", "index": 0},
-          {"node": "Send Critical Alert Email", "type": "main", "index": 0}
+          {
+            "node": "Slack Alert",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Send Critical Alert Email",
+            "type": "main",
+            "index": 0
+          }
         ],
-        [{"node": "Not Critical", "type": "main", "index": 0}]
+        [
+          {
+            "node": "Not Critical",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     }
   },
@@ -269,7 +324,13 @@
   },
   "id": "wf-competitive-signal-monitor",
   "tags": [
-    {"id": "tag-compsig", "name": "competitive-signals"},
-    {"id": "tag-alerts", "name": "alerts"}
+    {
+      "id": "tag-compsig",
+      "name": "competitive"
+    },
+    {
+      "id": "tag-monitoring",
+      "name": "monitoring"
+    }
   ]
 }

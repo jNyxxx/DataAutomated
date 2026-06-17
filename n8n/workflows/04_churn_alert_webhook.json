@@ -1,11 +1,10 @@
 {
-  "name": "04 — Churn Alert Webhook",
+  "name": "04 - Churn Alert Webhook",
   "nodes": [
     {
       "parameters": {
         "httpMethod": "POST",
         "path": "churn-alert",
-        "authentication": "headerAuth",
         "responseMode": "onReceived",
         "responseData": "firstEntryJson",
         "options": {}
@@ -15,13 +14,46 @@
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
       "position": [240, 300],
-      "webhookId": "churn-alert-webhook-id",
-      "credentials": {
-        "httpHeaderAuth": {
-          "id": "n8n-webhook-secret-credential",
-          "name": "N8N Webhook Secret"
-        }
-      }
+      "webhookId": "churn-alert-webhook-id"
+    },
+    {
+      "parameters": {
+        "jsCode": "const headers = $json.headers || {};\nconst provided = headers['x-n8n-webhook-secret'] || headers['X-N8N-Webhook-Secret'] || '';\nconst expected = $env.N8N_WEBHOOK_SECRET || '';\nreturn [{ json: { ...$json, secret_valid: provided !== '' && provided === expected } }];"
+      },
+      "id": "a4b5c6d7-0004-0004-0004-000000000008",
+      "name": "Validate Secret",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-secret",
+              "leftValue": "={{ $json.secret_valid === true }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a4b5c6d7-0004-0004-0004-000000000009",
+      "name": "Secret Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [680, 300]
     },
     {
       "parameters": {
@@ -50,32 +82,37 @@
       "name": "URGENT? (> 0.25)",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
-      "position": [460, 300]
+      "position": [920, 300]
     },
     {
       "parameters": {
-        "select": "channel",
-        "channelId": {
-          "__rl": true,
-          "value": "#churn-monitor",
-          "mode": "name"
+        "method": "POST",
+        "url": "https://slack.com/api/chat.postMessage",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$env.SLACK_BOT_TOKEN}}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
         },
-        "messageType": "block",
-        "blocksUi": "={{ JSON.stringify([\n  { type: 'header', text: { type: 'plain_text', text: '🚨 URGENT Churn Risk Alert' } },\n  { type: 'section', fields: [\n    { type: 'mrkdwn', text: '*Client ID:*\\n' + ($json.body.client_id || '—') },\n    { type: 'mrkdwn', text: '*Churn Risk Score:*\\n' + (($json.body.churn_risk_score || 0) * 100).toFixed(1) + '%' }\n  ] },\n  { type: 'section', text: { type: 'mrkdwn', text: '*Top Themes:*\\n' + JSON.stringify($json.body.top_themes || []) } },\n  { type: 'section', text: { type: 'mrkdwn', text: '⚠️ *Action required within 24 hours. Churn likely in 2–4 weeks.* <https://app.dataautomated.io/insights|View Dashboard>' } }\n]) }}",
-        "otherOptions": {}
+        "sendBody": true,
+        "bodyContentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  channel: '#churn-monitor',\n  text: 'URGENT churn risk alert: client_id=' + ($json.body.client_id || 'unknown') + ', churn_risk=' + (((($json.body.churn_risk_score || 0) * 100).toFixed(1))) + '%, themes=' + JSON.stringify($json.body.top_themes || []) + '. Review at http://localhost:3000/insights'\n}) }}",
+        "options": {}
       },
       "id": "a4b5c6d7-0004-0004-0004-000000000003",
       "name": "Slack URGENT Alert",
-      "type": "n8n-nodes-base.slack",
-      "typeVersion": 2.2,
-      "position": [700, 160],
-      "onError": "continueRegularOutput",
-      "credentials": {
-        "slackApi": {
-          "id": "dataautomated-slack-prod",
-          "name": "DataAutomated Slack"
-        }
-      }
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1160, 160],
+      "onError": "continueRegularOutput"
     },
     {
       "parameters": {
@@ -97,14 +134,14 @@
         "sendBody": true,
         "bodyContentType": "json",
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({\n  from: 'DataAutomated <alerts@dataautomated.io>',\n  to: [$json.body.client_email || 'team@dataautomated.io'],\n  subject: '🚨 URGENT: High Churn Risk Detected — Action Required',\n  html: '<h2 style=\"color:#dc2626;\">🚨 URGENT Churn Risk Alert</h2><p>A critical churn risk signal has been detected for one of your accounts.</p><table style=\"border-collapse:collapse;width:100%;\"><tr><td style=\"padding:8px;font-weight:bold;\">Client ID:</td><td style=\"padding:8px;\">' + $json.body.client_id + '</td></tr><tr><td style=\"padding:8px;font-weight:bold;\">Churn Risk Score:</td><td style=\"padding:8px;color:#dc2626;font-weight:bold;\">' + ($json.body.churn_risk_score * 100).toFixed(1) + '%</td></tr></table><p><strong>Top Themes:</strong></p><pre>' + JSON.stringify($json.body.top_themes, null, 2) + '</pre><p>Churn is likely within <strong>2–4 weeks</strong>. Immediate intervention recommended.</p><p><a href=\"https://app.dataautomated.io/insights\" style=\"background:#dc2626;color:white;padding:12px 24px;border-radius:6px;text-decoration:none;\">View Full Analysis</a></p>'\n}) }}",
+        "jsonBody": "={{ JSON.stringify({\n  from: 'DataAutomated <alerts@dataautomated.io>',\n  to: [$json.body.client_email || 'team@dataautomated.io'],\n  subject: 'URGENT: High Churn Risk Detected - Action Required',\n  html: '<h2 style=\"color:#dc2626;\">URGENT Churn Risk Alert</h2><p>A critical churn risk signal has been detected for one of your accounts.</p><table style=\"border-collapse:collapse;width:100%;\"><tr><td style=\"padding:8px;font-weight:bold;\">Client ID:</td><td style=\"padding:8px;\">' + $json.body.client_id + '</td></tr><tr><td style=\"padding:8px;font-weight:bold;\">Churn Risk Score:</td><td style=\"padding:8px;color:#dc2626;font-weight:bold;\">' + ($json.body.churn_risk_score * 100).toFixed(1) + '%</td></tr></table><p><strong>Top Themes:</strong></p><pre>' + JSON.stringify($json.body.top_themes, null, 2) + '</pre><p>Churn is likely within <strong>2-4 weeks</strong>. Immediate intervention recommended.</p><p><a href=\"http://localhost:3000/insights\" style=\"background:#dc2626;color:white;padding:12px 24px;border-radius:6px;text-decoration:none;\">View Full Analysis</a></p>'\n}) }}",
         "options": {}
       },
       "id": "a4b5c6d7-0004-0004-0004-000000000004",
       "name": "Send URGENT Email",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [700, 340]
+      "position": [1160, 340]
     },
     {
       "parameters": {
@@ -133,7 +170,7 @@
       "name": "Early Warning? (> 0.15)",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
-      "position": [700, 520]
+      "position": [1160, 520]
     },
     {
       "parameters": {
@@ -155,14 +192,14 @@
         "sendBody": true,
         "bodyContentType": "json",
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({\n  from: 'DataAutomated <alerts@dataautomated.io>',\n  to: [$json.body.client_email || 'team@dataautomated.io'],\n  subject: '⚠️ Churn Early Warning — Elevated Risk Detected',\n  html: '<h2 style=\"color:#d97706;\">⚠️ Churn Early Warning</h2><p>An elevated churn risk signal has been detected. This is an early warning — proactive intervention now can prevent churn.</p><table style=\"border-collapse:collapse;width:100%;\"><tr><td style=\"padding:8px;font-weight:bold;\">Client ID:</td><td style=\"padding:8px;\">' + $json.body.client_id + '</td></tr><tr><td style=\"padding:8px;font-weight:bold;\">Churn Risk Score:</td><td style=\"padding:8px;color:#d97706;font-weight:bold;\">' + ($json.body.churn_risk_score * 100).toFixed(1) + '%</td></tr></table><p><strong>Top Themes:</strong></p><pre>' + JSON.stringify($json.body.top_themes, null, 2) + '</pre><p>Churn is possible within <strong>2–4 weeks</strong> if not addressed.</p><p><a href=\"https://app.dataautomated.io/insights\" style=\"background:#d97706;color:white;padding:12px 24px;border-radius:6px;text-decoration:none;\">View Analysis</a></p>'\n}) }}",
+        "jsonBody": "={{ JSON.stringify({\n  from: 'DataAutomated <alerts@dataautomated.io>',\n  to: [$json.body.client_email || 'team@dataautomated.io'],\n  subject: 'Churn Early Warning - Elevated Risk Detected',\n  html: '<h2 style=\"color:#d97706;\">Churn Early Warning</h2><p>An elevated churn risk signal has been detected. This is an early warning - proactive intervention now can prevent churn.</p><table style=\"border-collapse:collapse;width:100%;\"><tr><td style=\"padding:8px;font-weight:bold;\">Client ID:</td><td style=\"padding:8px;\">' + $json.body.client_id + '</td></tr><tr><td style=\"padding:8px;font-weight:bold;\">Churn Risk Score:</td><td style=\"padding:8px;color:#d97706;font-weight:bold;\">' + ($json.body.churn_risk_score * 100).toFixed(1) + '%</td></tr></table><p><strong>Top Themes:</strong></p><pre>' + JSON.stringify($json.body.top_themes, null, 2) + '</pre><p>Churn is possible within <strong>2-4 weeks</strong> if not addressed.</p><p><a href=\"http://localhost:3000/insights\" style=\"background:#d97706;color:white;padding:12px 24px;border-radius:6px;text-decoration:none;\">View Analysis</a></p>'\n}) }}",
         "options": {}
       },
       "id": "a4b5c6d7-0004-0004-0004-000000000006",
       "name": "Send Early Warning Email",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [940, 460]
+      "position": [1400, 460]
     },
     {
       "parameters": {},
@@ -170,28 +207,97 @@
       "name": "Below Threshold",
       "type": "n8n-nodes-base.noOp",
       "typeVersion": 1,
-      "position": [940, 640]
+      "position": [1400, 640]
+    },
+    {
+      "parameters": {},
+      "id": "a4b5c6d7-0004-0004-0004-000000000010",
+      "name": "Unauthorized",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [920, 520]
     }
   ],
   "connections": {
     "Churn Alert Webhook": {
       "main": [
-        [{"node": "URGENT? (> 0.25)", "type": "main", "index": 0}]
+        [
+          {
+            "node": "Validate Secret",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Secret": {
+      "main": [
+        [
+          {
+            "node": "Secret Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Secret Valid?": {
+      "main": [
+        [
+          {
+            "node": "URGENT? (> 0.25)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Unauthorized",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "URGENT? (> 0.25)": {
       "main": [
         [
-          {"node": "Slack URGENT Alert", "type": "main", "index": 0},
-          {"node": "Send URGENT Email", "type": "main", "index": 0}
+          {
+            "node": "Slack URGENT Alert",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Send URGENT Email",
+            "type": "main",
+            "index": 0
+          }
         ],
-        [{"node": "Early Warning? (> 0.15)", "type": "main", "index": 0}]
+        [
+          {
+            "node": "Early Warning? (> 0.15)",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Early Warning? (> 0.15)": {
       "main": [
-        [{"node": "Send Early Warning Email", "type": "main", "index": 0}],
-        [{"node": "Below Threshold", "type": "main", "index": 0}]
+        [
+          {
+            "node": "Send Early Warning Email",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Below Threshold",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     }
   },
@@ -208,8 +314,17 @@
   },
   "id": "wf-churn-alert-webhook",
   "tags": [
-    {"id": "tag-churn", "name": "churn"},
-    {"id": "tag-alerts", "name": "alerts"},
-    {"id": "tag-voc", "name": "voc"}
+    {
+      "id": "tag-churn",
+      "name": "churn"
+    },
+    {
+      "id": "tag-alerts",
+      "name": "alerts"
+    },
+    {
+      "id": "tag-voc",
+      "name": "voc"
+    }
   ]
 }

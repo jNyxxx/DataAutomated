@@ -72,7 +72,6 @@ export default async function SignalsPage() {
                   <p className="mt-1 text-sm text-slate-500">Add a competitor to start monitoring signals from news, reviews, and social sources.</p>
                   {canTrigger && (
                     <button
-                      onClick={() => {}}
                       className="mt-4 inline-flex items-center gap-1 rounded text-sm font-medium text-blue-400 hover:text-blue-300"
                     >
                       + Add competitor in the panel →

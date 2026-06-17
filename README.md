@@ -16,6 +16,9 @@ Prerequisites: Docker + Docker Compose.
 cp .env.example .env        # fill in local values; .env is git-ignored (never commit it)
 docker compose up --build   # starts db, backend, frontend, n8n
 
+# Generate your initial admin account (demo@dataautomated.io) so you can log in
+docker exec da_backend python app/tools/seed_demo_user.py
+
 # Host-side database checks use localhost:5433.
 cd backend
 $env:DATABASE_URL="postgresql+asyncpg://dataautomated:change_me_locally@localhost:5433/dataautomated"

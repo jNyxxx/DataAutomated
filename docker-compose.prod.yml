@@ -42,7 +42,7 @@ services:
     # `aws ecs execute-command` or an init task before starting the n8n service.
     entrypoint: /bin/sh
     command: >
-      -c "n8n import:workflow --separate --input=/workflows/ || true && exec n8n"
+      -c "n8n import:workflow --separate --input=/workflows/ || true && n8n update:workflow --id=wf-daily-feedback-ingestion --active=true || true && n8n update:workflow --id=wf-competitive-signal-monitor --active=true || true && n8n update:workflow --id=wf-weekly-report-generation --active=true || true && n8n update:workflow --id=wf-churn-alert-webhook --active=true || true && exec n8n"
     volumes:
       - n8n_efs:/home/node/.n8n
       # Workflows come from EFS on AWS (populated from n8n/workflows/ in CI/deploy step).
