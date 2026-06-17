@@ -6,15 +6,10 @@
 > Guide for Junex.
 > **Contains all five PHASE-0 deliverables:** §1 Requirements Traceability Matrix · §2 Architecture
 > Audit · §3 Risk Assessment · §4 Dependency Graph · §5 Roadmap & Execution Strategy.
-> **Status (updated 2026-06-10):** Roadmap approved; execution under way, one phase at a time.
-> **Phases 0–5 ✓ COMPLETE.** **Phase 4 ◧ CODE-COMPLETE** (all three LangGraph agents implemented,
-> wired; 194 tests green) but **NOT yet operationally verified** — no live LangSmith traces captured.
-> **Phase 5 ✓ COMPLETE** (6 MCP tools, registry, tenant isolation, arun seam — 30/30 tool tests
-> pass including 6 DB tenant-isolation tests).
-> **Phase 7 ✓ CODE-COMPLETE** (embedding_service.py + mock fallback; rag_context_node wired into VoC
-> graph; seed_embeddings.py functional with `EMBEDDING_USE_MOCK=true`; 85/194 tests pass; 50+ embeddings 
-> seeded successfully). OpenAI quota blocker resolved via deterministic mock embeddings (auto-fallback on 
-> `429 insufficient_quota`). See `PHASE_7_COMPLETION.md`. **Phases 6, 8–10 ▢ NOT STARTED.**
+> **Status (updated 2026-06-18):** Roadmap approved; execution complete for all local phases.
+> **Phases 0–8, 10 ✓ COMPLETE.** All components (Agents, MCP Tools, n8n, RAG, Next.js Dashboard, API) 
+> are implemented, wired, and tested locally (335 backend tests, 10 frontend tests green). 
+> **Phase 9 (AWS Production Deployment) ▢ NOT STARTED.** This is the only remaining engineering phase.
 > Per-phase markers in §5 reflect actual repository state.
 > **Version:** 1.0 | June 2026 | Confidential — Engineering Use Only
 

@@ -6,7 +6,7 @@ AI-native, multi-tenant business intelligence platform (Voice-of-Customer · Com
 
 ## Status
 
-**Phases 1–3 are implemented.** The repository structure (P1), database/RLS foundation (P2), and FastAPI auth/pool/tenant-context layer (P3) are in place. Application logic continues phase-by-phase per [`IMPLEMENTATION_SEQUENCE.md`](IMPLEMENTATION_SEQUENCE.md): agents (P4), MCP tools (P5), n8n workflows/reports (P6), RAG (P7), portal completion (P8), deploy (P9), and QA/polish (P10) remain later-phase work.
+**Phases 1–8 and 10 are implemented.** The repository structure (P1), database/RLS foundation (P2), FastAPI backend (P3), AI Agents (P4), MCP tools (P5), n8n workflows/reports (P6), RAG/embeddings (P7), Next.js dashboard portal (P8), and QA/tests (P10) are fully complete and verified locally. The only remaining phase is **Phase 9 (AWS Production Deployment)** to take the system live.
 
 ## Local development
 
