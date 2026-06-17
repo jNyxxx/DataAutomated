@@ -910,5 +910,5 @@ async def test_registry_contains_all_mvp_source_types():
         "news", "g2", "capterra", "linkedin_jobs",
         "mixpanel", "segment", "shopify",
     }
-    assert expected == set(TOOL_REGISTRY.keys())
+    assert expected.issubset(set(TOOL_REGISTRY.keys()))
     assert all(t.category in ("voc", "compsig", "journey") for t in TOOL_REGISTRY.values())

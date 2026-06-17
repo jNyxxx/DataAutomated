@@ -158,15 +158,15 @@ async def test_classify_valid_output():
         {"competitor_name": "Globex", "raw_content": "Globex hired a new CFO"},
     ]
     llm = _mock_llm(json.dumps([
-        {"signal_type": "pricing", "urgency": "critical"},
-        {"signal_type": "hiring", "urgency": "low"},
+        {"signal_type": "pricing_change", "urgency": "critical"},
+        {"signal_type": "hiring_spike", "urgency": "low"},
     ]))
     result = await classify_signals_node(_base_state(raw_signals=raw), llm)
     cs = result["classified_signals"]
     assert len(cs) == 2
-    assert cs[0]["signal_type"] == "pricing"
+    assert cs[0]["signal_type"] == "pricing_change"
     assert cs[0]["urgency"] == "critical"
-    assert cs[1]["signal_type"] == "hiring"
+    assert cs[1]["signal_type"] == "hiring_spike"
 
 
 async def test_classify_defaults_on_malformed():
