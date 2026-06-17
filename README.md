@@ -13,7 +13,7 @@ Subsequent phases are structurally complete but await final live verification:
 - **P6 (n8n/Reports):** mostly implemented, pending live n8n/Resend/Slack/report verification
 - **P7 (RAG):** code-complete, pending real OpenAI quota/RAG verification
 - **P8 (Portal):** frontend implemented, pending full E2E verification
-Phase 9 (AWS Deploy) and the final pass of Phase 10 (QA/Polish) remain as the next major steps.
+- **P9/P10 (Deploy & QA):** production deployment, load testing, and final QA gates pending
 
 ## Local development
 

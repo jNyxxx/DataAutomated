@@ -13,7 +13,7 @@
 > **P6 (n8n/Reports):** ◧ MOSTLY IMPLEMENTED, pending live n8n/Resend/Slack/report verification.
 > **P7 (RAG):** ◧ CODE-COMPLETE, pending real OpenAI quota/RAG verification.
 > **P8 (Portal):** ◧ FRONTEND IMPLEMENTED, pending full E2E verification.
-> **Phase 9 (AWS Production Deployment) ▢ NOT STARTED.** This is the only remaining engineering phase.
+> **P9/P10 (Deploy & QA):** ▢ NOT STARTED, production deployment, load testing, and final QA gates pending.
 > Per-phase markers in §5 reflect actual repository state.
 > **Version:** 1.0 | June 2026 | Confidential — Engineering Use Only
 
