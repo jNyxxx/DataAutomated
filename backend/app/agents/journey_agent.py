@@ -360,11 +360,11 @@ async def store_node(state: JourneyState) -> dict:
             cause = rec.get("friction_cause")
             if cause not in _VALID_FRICTION:
                 cause = "ux_friction"
-            await conn.execute(
+            new_id = await conn.fetchval(
                 "INSERT INTO journey_insights "
                 "(client_id, funnel_step, drop_off_rate, friction_score, "
                 " friction_cause, recommendation, projected_lift) "
-                "VALUES ($1, $2, $3, $4, $5, $6, $7)",
+                "VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id",
                 state["client_id"],
                 rec.get("funnel_step"),
                 rec.get("drop_off_rate"),
@@ -373,6 +373,8 @@ async def store_node(state: JourneyState) -> dict:
                 rec.get("recommendation"),
                 rec.get("projected_lift"),
             )
+            from app.services.realtime_service import publish_event
+            await publish_event(state["client_id"], "journey_insight.created", str(new_id), {"funnel_step": rec.get("funnel_step")})
 
     logger.info(
         '{"event": "journey.stored", "client_id": "%s", "count": %d}',

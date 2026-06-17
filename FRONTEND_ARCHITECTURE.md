@@ -74,8 +74,9 @@ The single data-access path to the backend (CLAUDE §11):
 
 - **Transport:** Server-Sent Events. The frontend consumes `GET /stream/insights` via `EventSource` (BACKEND §7 provides it).
 - **Update handling:** on message, parse JSON, **prepend** to the list state, **show a toast** ("New insight available"); always `eventSource.close()` on unmount (CLAUDE §11, §12). This is a Client Component island (interactivity required).
-- **No client polling.** Client-side polling of REST endpoints to simulate real-time is **not allowed** (CLAUDE §12; NFR-06). The sanctioned server-side 5s check lives in the backend generator, not the browser.
-- **Connection caps/backoff (AUD-07 / RISK-13):** long-lived SSE connections scale with concurrent dashboards; cap and back off reconnections for MVP; the move to event-on-persist notification is post-MVP and does not change the SSE transport (BACKEND §7; ADR-012 future constraint).
+- **No client polling.** Client-side polling of REST endpoints to simulate real-time is **not allowed** (CLAUDE §12; NFR-06). The backend uses event-driven `realtime_events` with Postgres `LISTEN/NOTIFY` under the hood.
+- **Durable Replay:** The frontend proxies the browser's `Last-Event-ID` to the backend for seamless catch-up on missed events upon reconnection.
+- **Connection caps/backoff (AUD-07 / RISK-13):** EventSource clients implement exponential backoff on disconnect. The backend event broker fans out notifications without exhausting the database connection pool.
 
 ---
 

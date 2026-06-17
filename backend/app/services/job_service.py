@@ -158,15 +158,19 @@ async def run_tracked(client_id: UUID, job_type: str, agent_coro) -> None:
     """
     job_id = await _create_job(client_id, job_type)
     await _set_running(client_id, job_id)
+    from app.services.realtime_service import publish_event
+    await publish_event(client_id, "agent_job.started", job_id, {"job_type": job_type})
     try:
         await agent_coro
         await _set_succeeded(client_id, job_id)
+        await publish_event(client_id, "agent_job.completed", job_id, {"job_type": job_type, "status": "succeeded"})
         logger.info(
             '{"event":"job.succeeded","job_id":"%s","type":"%s","client":"%s"}',
             job_id, job_type, client_id,
         )
     except Exception as exc:
         await _set_failed_or_dead(client_id, job_id, str(exc))
+        await publish_event(client_id, "agent_job.failed", job_id, {"job_type": job_type, "status": "failed", "error": str(exc)[:200]})
 
 
 async def sweep_failed_jobs() -> None:
@@ -235,15 +239,21 @@ async def retry_job_now(client_id: UUID, job_id: str) -> None:
 async def _retry_job(client_id: UUID, job_id: str, job_type: str) -> None:
     """Reset to running and re-execute the agent for an existing job row."""
     await _set_running(client_id, job_id)
+    from app.services.realtime_service import publish_event
+    await publish_event(client_id, "agent_job.started", job_id, {"job_type": job_type, "retry": True})
     try:
         coro = _build_agent_coro(client_id, job_type)
         if coro is None:
-            await _set_failed_or_dead(client_id, job_id, f"unknown job_type: {job_type}")
+            err = f"unknown job_type: {job_type}"
+            await _set_failed_or_dead(client_id, job_id, err)
+            await publish_event(client_id, "agent_job.failed", job_id, {"job_type": job_type, "error": err})
             return
         await coro
         await _set_succeeded(client_id, job_id)
+        await publish_event(client_id, "agent_job.completed", job_id, {"job_type": job_type, "status": "succeeded"})
     except Exception as exc:
         await _set_failed_or_dead(client_id, job_id, str(exc))
+        await publish_event(client_id, "agent_job.failed", job_id, {"job_type": job_type, "error": str(exc)[:200]})
 
 
 def _build_agent_coro(client_id: UUID, job_type: str):

@@ -175,40 +175,67 @@ async def update_data_source(
     except (ValueError, AttributeError):
         raise HTTPException(status_code=404, detail="Data source not found.")
 
-    set_clauses: list[str] = []
-    values: list[Any] = []
-
-    if is_active is not None:
-        values.append(bool(is_active))
-        set_clauses.append(f"is_active = ${len(values)}")
-        if not bool(is_active):
-            values.append("disconnected")
-            set_clauses.append(f"connection_status = ${len(values)}")
-    if raw_credentials is not None:
-        values.append(json.dumps(encrypt_credentials(raw_credentials)))
-        set_clauses.append(f"credentials = ${len(values)}::jsonb")
-        # Credentials changed — require re-test before marking active
-        values.append("pending_configuration")
-        set_clauses.append(f"connection_status = ${len(values)}")
-        values.append(None)
-        set_clauses.append(f"connection_error = ${len(values)}")
-    if config is not None:
-        values.append(json.dumps(config))
-        set_clauses.append(f"config = ${len(values)}::jsonb")
-
-    values.append(source_uuid)
-    values.append(current_user.client_id)
-    pk_idx = len(values) - 1
-    cid_idx = len(values)
-
     async with acquire_for_client(current_user.client_id) as conn:
+        row = await conn.fetchrow(
+            "SELECT credentials, config FROM data_sources WHERE id = $1 AND client_id = $2",
+            source_uuid,
+            current_user.client_id,
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="Data source not found.")
+
+        set_clauses: list[str] = []
+        values: list[Any] = []
+
+        if is_active is not None:
+            values.append(bool(is_active))
+            set_clauses.append(f"is_active = ${len(values)}")
+            if not bool(is_active):
+                values.append("disconnected")
+                set_clauses.append(f"connection_status = ${len(values)}")
+        
+        if raw_credentials is not None:
+            import json as _json
+            from app.services.credential_encryption import decrypt_credentials, encrypt_credentials
+            existing_creds_raw = row["credentials"]
+            if isinstance(existing_creds_raw, str):
+                existing_creds_raw = _json.loads(existing_creds_raw) if existing_creds_raw else {}
+            existing_creds = decrypt_credentials(existing_creds_raw) if existing_creds_raw else {}
+            
+            merged_creds = {**existing_creds, **raw_credentials}
+            
+            values.append(json.dumps(encrypt_credentials(merged_creds)))
+            set_clauses.append(f"credentials = ${len(values)}::jsonb")
+            # Credentials changed — require re-test before marking active
+            values.append("pending_configuration")
+            set_clauses.append(f"connection_status = ${len(values)}")
+            values.append(None)
+            set_clauses.append(f"connection_error = ${len(values)}")
+            
+        if config is not None:
+            import json as _json
+            existing_config_raw = row["config"]
+            if isinstance(existing_config_raw, str):
+                existing_config_raw = _json.loads(existing_config_raw) if existing_config_raw else {}
+            existing_config = existing_config_raw or {}
+            merged_config = {**existing_config, **config}
+            
+            values.append(json.dumps(merged_config))
+            set_clauses.append(f"config = ${len(values)}::jsonb")
+
+        if not set_clauses:
+            return {"status": "updated"}
+
+        values.append(source_uuid)
+        values.append(current_user.client_id)
+        pk_idx = len(values) - 1
+        cid_idx = len(values)
+
         result = await conn.execute(
             f"UPDATE data_sources SET {', '.join(set_clauses)} "
             f"WHERE id = ${pk_idx} AND client_id = ${cid_idx}",
             *values,
         )
-    if result == "UPDATE 0":
-        raise HTTPException(status_code=404, detail="Data source not found.")
 
     credentials_updated = raw_credentials is not None
     being_activated = is_active is True

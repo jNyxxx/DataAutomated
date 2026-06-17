@@ -114,7 +114,7 @@ export default async function SettingsPage() {
                               status={s.connection_status}
                             />
                           )}
-                          <SourceRowMenu sourceId={s.id} sourceName={s.source_type} />
+                          <SourceRowMenu sourceId={s.id} sourceName={s.source_type} sourceConfig={s.config} />
                         </div>
                       </td>
                     </tr>

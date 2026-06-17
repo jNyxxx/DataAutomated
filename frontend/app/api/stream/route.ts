@@ -11,6 +11,12 @@ export async function GET(_request: NextRequest) {
   }
   const backendUrl = configured ?? 'http://localhost:8000';
 
+  const lastEventId = _request.headers.get('Last-Event-ID') || _request.nextUrl.searchParams.get('lastEventId');
+  const headers: Record<string, string> = { Accept: 'text/event-stream', 'Cache-Control': 'no-cache' };
+  if (lastEventId) {
+    headers['Last-Event-ID'] = lastEventId;
+  }
+
   // Step 1: exchange JWT for a single-use SSE ticket.
   // The backend's /stream/insights only accepts ?ticket= or ?token= query params
   // (not an Authorization header) because EventSource doesn't support custom headers.
@@ -27,7 +33,7 @@ export async function GET(_request: NextRequest) {
   // Step 2: open the SSE stream using the ticket query param.
   const upstream = await fetch(
     `${backendUrl}/stream/insights?ticket=${encodeURIComponent(ticket)}`,
-    { headers: { Accept: 'text/event-stream', 'Cache-Control': 'no-cache' } },
+    { headers },
   ).catch(() => null);
 
   if (!upstream || !upstream.ok || !upstream.body) {

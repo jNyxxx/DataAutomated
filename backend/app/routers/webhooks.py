@@ -56,8 +56,9 @@ async def _auto_trigger_voc(client_id: UUID) -> None:
         return
     try:
         from app.agents.voc_agent import run_voc_analysis  # lazy import — heavy
+        from app.services.job_service import run_tracked
         logger.info('{"event":"webhook.auto_trigger_voc","client_id":"%s"}', client_id)
-        await run_voc_analysis(client_id)
+        await run_tracked(client_id, "voc", run_voc_analysis(client_id))
     except Exception:
         logger.exception("_auto_trigger_voc: agent run failed for client %s", client_id)
 
@@ -174,7 +175,7 @@ async def zendesk_webhook(
         return {"status": "ignored", "reason": "no_active_zendesk_source"}
 
     async with acquire_for_client(resolved_client_id) as conn:
-        await conn.execute(
+        result = await conn.execute(
             _DEDUP_WEBHOOK_FEEDBACK,
             resolved_client_id,
             source_id,
@@ -189,6 +190,9 @@ async def zendesk_webhook(
                 "via": "webhook",
             }),
         )
+        if result.endswith("1"):
+            from app.services.realtime_service import publish_event
+            await publish_event(resolved_client_id, "raw_feedback.created", str(ticket.get("id", "")), {"source": "zendesk"})
         await conn.execute(
             "UPDATE data_sources SET last_synced_at = NOW() WHERE id = $1 AND client_id = $2",
             source_id, resolved_client_id,
@@ -244,7 +248,7 @@ async def typeform_webhook(
         return {"status": "ignored", "reason": "no_active_typeform_source"}
 
     async with acquire_for_client(resolved_client_id) as conn:
-        await conn.execute(
+        result = await conn.execute(
             _DEDUP_WEBHOOK_FEEDBACK,
             resolved_client_id,
             source_id,
@@ -258,6 +262,9 @@ async def typeform_webhook(
                 "via": "webhook",
             }),
         )
+        if result.endswith("1"):
+            from app.services.realtime_service import publish_event
+            await publish_event(resolved_client_id, "raw_feedback.created", form_response.get("token", ""), {"source": "typeform"})
         await conn.execute(
             "UPDATE data_sources SET last_synced_at = NOW() WHERE id = $1 AND client_id = $2",
             source_id, resolved_client_id,
@@ -303,7 +310,7 @@ async def intercom_webhook(
         return {"status": "ignored", "reason": "no_active_intercom_source"}
 
     async with acquire_for_client(resolved_client_id) as conn:
-        await conn.execute(
+        result = await conn.execute(
             _DEDUP_WEBHOOK_FEEDBACK,
             resolved_client_id,
             source_id,
@@ -318,6 +325,9 @@ async def intercom_webhook(
                 "via": "webhook",
             }),
         )
+        if result.endswith("1"):
+            from app.services.realtime_service import publish_event
+            await publish_event(resolved_client_id, "raw_feedback.created", str(item.get("id", "")), {"source": "intercom"})
         await conn.execute(
             "UPDATE data_sources SET last_synced_at = NOW() WHERE id = $1 AND client_id = $2",
             source_id, resolved_client_id,

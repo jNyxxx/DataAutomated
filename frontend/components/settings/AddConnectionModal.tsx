@@ -12,7 +12,7 @@ import { createConnectionAction } from '@/app/(dashboard)/settings/actions';
 // The key property becomes the credential object key sent to the backend.
 // `textarea: true` renders a <textarea> for long values (e.g. JSON blobs).
 
-interface CredField {
+export interface CredField {
   key: string;
   label: string;
   placeholder: string;
@@ -22,7 +22,7 @@ interface CredField {
   target?: 'credentials' | 'config';
 }
 
-const CRED_FIELDS: Record<string, CredField[]> = {
+export const CRED_FIELDS: Record<string, CredField[]> = {
   zendesk: [
     { key: 'subdomain',  label: 'Subdomain',   placeholder: 'yourcompany (before .zendesk.com)', required: true },
     { key: 'email',      label: 'Agent email',  placeholder: 'agent@yourcompany.com',              required: true },
@@ -83,7 +83,7 @@ const CRED_FIELDS: Record<string, CredField[]> = {
 
 // ── Platform catalogue ────────────────────────────────────────────────────────
 
-type Platform = {
+export type Platform = {
   id: string;
   name: string;
   desc: string;
@@ -91,7 +91,7 @@ type Platform = {
   credentialsRequired: boolean;
 };
 
-const PLATFORMS: Platform[] = [
+export const PLATFORMS: Platform[] = [
   // VoC
   { id: 'zendesk',      name: 'Zendesk',           desc: 'Support tickets',          category: 'voc',     credentialsRequired: true },
   { id: 'intercom',     name: 'Intercom',           desc: 'Chat & inbox',             category: 'voc',     credentialsRequired: true },

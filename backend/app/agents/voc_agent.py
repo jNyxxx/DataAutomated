@@ -327,11 +327,11 @@ async def store_results_node(state: VoCState) -> dict:
     themes_json = json.dumps(state["theme_clusters"])
 
     async with acquire_for_client(state["client_id"]) as conn:
-        await conn.execute(
+        new_id = await conn.fetchval(
             "INSERT INTO feedback_insights "
             "(client_id, feedback_ids, sentiment_score, sentiment_label, urgency_score, "
             " themes, narrative, churn_risk, period_start, period_end) "
-            "VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10)",
+            "VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10) RETURNING id",
             state["client_id"],
             feedback_ids,
             mean_sentiment,
@@ -349,6 +349,8 @@ async def store_results_node(state: VoCState) -> dict:
             feedback_ids,
             state["client_id"],
         )
+    from app.services.realtime_service import publish_event
+    await publish_event(state["client_id"], "feedback_insight.created", str(new_id))
 
     logger.info(
         '{"event": "voc.stored", "client_id": "%s", "items": %d, "churn_risk": %.3f}',

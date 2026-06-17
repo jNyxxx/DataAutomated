@@ -222,22 +222,30 @@ async def generate_report(
     s3_url = _upload_to_s3(pdf_bytes, s3_key)  # raises on S3 failure
 
     report_id = report_id or str(uuid.uuid4())
-    # ON CONFLICT DO NOTHING: if the same client already has a report for this
-    # s3_key today (a duplicate trigger), the row is silently skipped.  The
-    # pre-allocated report_id will never appear in the DB, so WF03's pinned fetch
-    # returns null → routes to the safe-skip branch — no duplicate email sent.
-    await conn.execute(
-        """INSERT INTO reports (id, client_id, report_type, s3_key, period_start, period_end, created_at)
-           VALUES ($1, $2, $3, $4, $5, $6, $7)
-           ON CONFLICT (client_id, s3_key) DO NOTHING""",
-        uuid.UUID(report_id),
-        uuid.UUID(client_id),
-        report_type,
-        s3_key,
-        period_start,
-        period_end,
-        now,
-    )
+    try:
+        await conn.execute(
+            """INSERT INTO reports (id, client_id, report_type, s3_key, period_start, period_end, created_at)
+               VALUES ($1, $2, $3, $4, $5, $6, $7)
+               ON CONFLICT (id) DO UPDATE 
+               SET s3_key = EXCLUDED.s3_key, 
+                   period_start = EXCLUDED.period_start, 
+                   period_end = EXCLUDED.period_end""",
+            uuid.UUID(report_id),
+            uuid.UUID(client_id),
+            report_type,
+            s3_key,
+            period_start,
+            period_end,
+            now,
+        )
+        from app.services.realtime_service import publish_event
+        await publish_event(uuid.UUID(client_id), "report.created", report_id, {"report_type": report_type, "s3_key": s3_key})
+    except asyncpg.exceptions.UniqueViolationError:
+        # ON CONFLICT DO NOTHING: if the same client already has a report for this
+        # s3_key today (a duplicate trigger), the row is silently skipped.  The
+        # pre-allocated report_id will never appear in the DB, so WF03's pinned fetch
+        # returns null → routes to the safe-skip branch — no duplicate email sent.
+        await conn.execute("DELETE FROM reports WHERE id = $1", uuid.UUID(report_id))
 
     logger.info("report generated client=%s id=%s", client_id, report_id)
     return {"report_id": report_id, "s3_url": s3_url, "status": "complete"}

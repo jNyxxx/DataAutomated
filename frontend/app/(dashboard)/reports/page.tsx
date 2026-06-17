@@ -194,24 +194,35 @@ function LatestBriefing({ briefing }: { briefing: Briefing | null }) {
         </Badge>
       </div>
 
-      <div className="mt-4 grid grid-cols-1 gap-5 sm:grid-cols-[140px_1fr]">
-        <div className="hidden flex-col gap-2 rounded-lg bg-slate-900 p-4 sm:flex">
-          <span className="truncate text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-            DataAutomated - Weekly
-          </span>
-          <span className="text-sm font-semibold leading-snug text-white">
-            Intelligence Briefing
-          </span>
-          <div className="mt-1 space-y-1.5">
-            <span className="block h-1.5 w-5/6 rounded bg-slate-700" />
-            <span className="block h-1.5 w-full rounded bg-slate-700" />
-            <span className="block h-1.5 w-11/12 rounded bg-slate-700" />
-            <span className="block h-1.5 w-2/3 rounded bg-slate-700" />
+      <div className="mt-4 grid grid-cols-1 gap-5 sm:grid-cols-[160px_1fr]">
+        <div className="hidden flex-col gap-3 sm:flex">
+          <div className="flex h-[200px] flex-col gap-2 rounded-xl bg-gradient-to-b from-slate-800 to-slate-900 p-4 shadow-lg ring-1 ring-white/10">
+            <span className="truncate text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+              DataAutomated
+            </span>
+            <span className="text-sm font-semibold leading-snug text-white">
+              Intelligence Briefing
+            </span>
+            <div className="mt-2 space-y-1.5 opacity-50">
+              <span className="block h-1.5 w-5/6 rounded bg-slate-600" />
+              <span className="block h-1.5 w-full rounded bg-slate-600" />
+              <span className="block h-1.5 w-11/12 rounded bg-slate-600" />
+              <span className="block h-1.5 w-2/3 rounded bg-slate-600" />
+            </div>
+            <div className="mt-auto flex gap-1.5 pt-3">
+              <span className="size-2 rounded-full bg-teal-400" />
+              <span className="size-2 rounded-full bg-rose-400" />
+              <span className="size-2 rounded-full bg-blue-400" />
+            </div>
           </div>
-          <div className="mt-auto flex gap-1.5 pt-3">
-            <span className="size-2 rounded-full bg-teal-400" />
-            <span className="size-2 rounded-full bg-rose-400" />
-            <span className="size-2 rounded-full bg-blue-400" />
+          
+          <div className="flex flex-col gap-2">
+            {briefing && (
+              <>
+                <OpenFullReportButton reportId={briefing.id} className="w-full justify-center" />
+                <DownloadPdfButton reportId={briefing.id} className="w-full justify-center" />
+              </>
+            )}
           </div>
         </div>
 
@@ -220,32 +231,35 @@ function LatestBriefing({ briefing }: { briefing: Briefing | null }) {
             <Sparkles className="size-4" />
             AI executive summary
           </div>
-          <p className="line-clamp-3 text-lg leading-relaxed text-slate-200">
-            {briefing?.summary ?? 'This week\'s executive summary will appear here once the briefing has generated.'}
-          </p>
+          
+          {briefing?.summary ? (
+            <p className="text-base leading-relaxed text-slate-200">
+              {briefing.summary}
+            </p>
+          ) : (
+            <div className="rounded-xl border border-dashed border-white/10 bg-slate-900/50 p-6 text-center shadow-inner">
+              <p className="text-sm font-medium text-slate-300">Awaiting AI Analysis</p>
+              <p className="mt-1 text-xs text-slate-500">
+                The executive summary will appear here once the LLM processes your data.
+              </p>
+            </div>
+          )}
 
-          <ul className="mt-4 space-y-2">
-            {(briefing?.highlights ?? []).map((highlight, index) => (
-              <li key={`${highlight.stream}-${index}`} className="flex items-start gap-3 rounded-lg bg-slate-900/50 p-3">
-                <Badge variant={highlight.stream} dot className="mt-0.5 shrink-0">
-                  {STREAM_LABEL[highlight.stream]}
-                </Badge>
-                <p className="line-clamp-2 min-w-0 text-sm leading-relaxed text-slate-300">
-                  {highlight.text}
-                </p>
-              </li>
-            ))}
-          </ul>
+          {briefing?.highlights && briefing.highlights.length > 0 && (
+            <ul className="mt-5 space-y-2.5">
+              {briefing.highlights.map((highlight, index) => (
+                <li key={`${highlight.stream}-${index}`} className="flex items-start gap-3 rounded-xl bg-slate-900/40 p-3.5 ring-1 ring-white/5 transition-colors hover:bg-slate-900/60">
+                  <Badge variant={highlight.stream} dot className="mt-0.5 shrink-0">
+                    {STREAM_LABEL[highlight.stream]}
+                  </Badge>
+                  <p className="line-clamp-2 min-w-0 text-sm leading-relaxed text-slate-300">
+                    {highlight.text}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
-      </div>
-
-      <div className="mt-5 flex flex-wrap gap-2">
-        {briefing && (
-          <>
-            <OpenFullReportButton reportId={briefing.id} />
-            <DownloadPdfButton reportId={briefing.id} />
-          </>
-        )}
       </div>
     </section>
   );

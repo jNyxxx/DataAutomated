@@ -23,7 +23,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
 import app.database as _db
@@ -227,58 +227,7 @@ async def get_insight(
 # /stream/insights — SSE (CLAUDE.md §12)
 # ---------------------------------------------------------------------------
 
-async def _fetch_insights_since(conn, client_id: UUID, since) -> list:
-    """
-    Rows created strictly after the `since` watermark, oldest-first.
 
-    The watermark is `created_at` (not the previously-emitted id): with an id
-    watermark, once the newest row is emitted the query "latest row whose id is
-    not the last one" returns the SECOND-newest (an old row) and the stream then
-    oscillates between the two newest rows forever.  A monotonic created_at
-    watermark only ever advances, so each row is emitted exactly once.
-    """
-    return await conn.fetch(
-        "SELECT id, narrative, churn_risk, created_at "
-        "FROM feedback_insights "
-        "WHERE client_id = $1 AND created_at > $2 "
-        "ORDER BY created_at ASC",
-        client_id, since,
-    )
-
-
-async def _fetch_signals_since(conn, client_id: UUID, since) -> list:
-    """Competitive signal rows detected strictly after the `since` watermark, oldest-first.
-    competitive_signals uses detected_at (not created_at) as its primary timestamp."""
-    return await conn.fetch(
-        "SELECT id, competitor_name, signal_type, detected_at "
-        "FROM competitive_signals "
-        "WHERE client_id = $1 AND detected_at > $2 "
-        "ORDER BY detected_at ASC",
-        client_id, since,
-    )
-
-
-async def _fetch_journeys_since(conn, client_id: UUID, since) -> list:
-    """Journey insight rows created strictly after the `since` watermark, oldest-first."""
-    return await conn.fetch(
-        "SELECT id, funnel_step, drop_off_rate, friction_cause, created_at "
-        "FROM journey_insights "
-        "WHERE client_id = $1 AND created_at > $2 "
-        "ORDER BY created_at ASC",
-        client_id, since,
-    )
-
-
-async def _fetch_jobs_since(conn, client_id: UUID, since) -> list:
-    """Terminal agent_jobs (succeeded/failed/dead) completed strictly after `since`, oldest-first."""
-    return await conn.fetch(
-        "SELECT id, job_type, status, last_error, completed_at "
-        "FROM agent_jobs "
-        "WHERE client_id = $1 AND completed_at > $2 "
-        "  AND status IN ('succeeded', 'failed', 'dead') "
-        "ORDER BY completed_at ASC",
-        client_id, since,
-    )
 
 
 @_extra.post("/api/sse-ticket", status_code=200, summary="Issue a short-lived SSE access ticket")
@@ -304,12 +253,13 @@ async def issue_sse_ticket(current_user: CurrentUser = Depends(get_current_user)
 
 @_extra.get("/stream/insights", summary="SSE stream of new VoC insights")
 async def stream_insights(
+    request: Request,
     ticket: str | None = Query(default=None, description="Short-lived ticket from POST /api/sse-ticket (preferred)"),
     token: str | None = Query(default=None, description="JWT bearer fallback — prefer ticket to avoid log leakage"),
 ):
     """
-    Server-Sent Events stream (CLAUDE.md §12).  Polls feedback_insights every 5s
-    and pushes rows created after connect.  Client closes the EventSource to stop.
+    Server-Sent Events stream (CLAUDE.md §12).  Uses PostgreSQL LISTEN/NOTIFY
+    for real-time push. Client closes the EventSource to stop.
 
     Auth: prefer POST /api/sse-ticket → use returned ticket here.  Raw JWT query
     param is accepted as a fallback but should not be used in production (token
@@ -334,52 +284,43 @@ async def stream_insights(
     else:
         raise HTTPException(status_code=401, detail="Authentication required.")
 
+    last_event_id = request.headers.get("Last-Event-ID")
+
     async def _generator():
-        # Seed per-table watermarks to "now" — prevents replaying existing rows.
-        async with acquire_for_client(client_id) as conn:
-            last_insight = await conn.fetchval(
-                "SELECT COALESCE(MAX(created_at), NOW()) FROM feedback_insights WHERE client_id = $1",
-                client_id,
-            )
-            last_signal = await conn.fetchval(
-                "SELECT COALESCE(MAX(detected_at), NOW()) FROM competitive_signals WHERE client_id = $1",
-                client_id,
-            )
-            last_journey = await conn.fetchval(
-                "SELECT COALESCE(MAX(created_at), NOW()) FROM journey_insights WHERE client_id = $1",
-                client_id,
-            )
-            last_job = await conn.fetchval(
-                "SELECT COALESCE(MAX(completed_at), NOW()) FROM agent_jobs WHERE client_id = $1",
-                client_id,
-            )
-        while True:
-            async with acquire_for_client(client_id) as conn:
-                insight_rows = await _fetch_insights_since(conn, client_id, last_insight)
-                signal_rows  = await _fetch_signals_since(conn, client_id, last_signal)
-                journey_rows = await _fetch_journeys_since(conn, client_id, last_journey)
-                job_rows     = await _fetch_jobs_since(conn, client_id, last_job)
-            for row in insight_rows:
-                last_insight = row["created_at"]
-                payload = _row_dict(row)
-                payload["event_type"] = "insight"
-                yield f"data: {json.dumps(payload)}\n\n"
-            for row in signal_rows:
-                last_signal = row["detected_at"]
-                payload = _row_dict(row)
-                payload["event_type"] = "signal"
-                yield f"data: {json.dumps(payload)}\n\n"
-            for row in journey_rows:
-                last_journey = row["created_at"]
-                payload = _row_dict(row)
-                payload["event_type"] = "journey"
-                yield f"data: {json.dumps(payload)}\n\n"
-            for row in job_rows:
-                last_job = row["completed_at"]
-                payload = _row_dict(row)
-                payload["event_type"] = "job"
-                yield f"data: {json.dumps(payload)}\n\n"
-            await asyncio.sleep(5)
+        from app.services.realtime_service import broker
+        queue = broker.subscribe(client_id)
+
+        try:
+            if last_event_id:
+                try:
+                    last_id = UUID(last_event_id)
+                    async with acquire_for_client(client_id) as conn:
+                        missed_rows = await conn.fetch(
+                            "SELECT id, event_type, entity_id, payload, created_at "
+                            "FROM realtime_events "
+                            "WHERE client_id = $1 AND created_at > ("
+                            "   SELECT created_at FROM realtime_events WHERE id = $2 AND client_id = $1"
+                            ") ORDER BY created_at ASC",
+                            client_id, last_id
+                        )
+                    for row in missed_rows:
+                        evt_data = _row_dict(row)
+                        if isinstance(evt_data.get('payload'), str):
+                            evt_data['payload'] = json.loads(evt_data['payload'])
+                        yield f"id: {evt_data['id']}\nevent: {evt_data['event_type']}\ndata: {json.dumps(evt_data)}\n\n"
+                except (ValueError, TypeError):
+                    pass
+
+            while True:
+                try:
+                    data = await asyncio.wait_for(queue.get(), timeout=15.0)
+                    if "client_id" in data:
+                        del data["client_id"]
+                    yield f"id: {data.get('id')}\nevent: {data.get('event_type')}\ndata: {json.dumps(data)}\n\n"
+                except asyncio.TimeoutError:
+                    yield f"event: heartbeat\ndata: {json.dumps({'time': datetime.now(timezone.utc).isoformat()})}\n\n"
+        finally:
+            broker.unsubscribe(client_id, queue)
 
     return StreamingResponse(_generator(), media_type="text/event-stream")
 

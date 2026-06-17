@@ -141,8 +141,12 @@ async def lifespan(app: FastAPI):
 
     _sweep_task = _asyncio.create_task(_sweep_loop(), name="job_sweep_loop")
 
+    from app.services.realtime_service import broker
+    _broker_task = _asyncio.create_task(broker.start_listening(), name="event_broker_loop")
+
     yield
     _sweep_task.cancel()
+    _broker_task.cancel()
     await close_pool()
 
 

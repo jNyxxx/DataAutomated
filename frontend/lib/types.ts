@@ -120,6 +120,7 @@ export interface DataSource {
   created_at: string;
   connection_status: 'pending_configuration' | 'active' | 'failed' | 'disconnected';
   connection_error: string | null;
+  config?: Record<string, string>;
 }
 
 export interface DataSourcesListResponse {

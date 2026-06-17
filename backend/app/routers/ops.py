@@ -604,6 +604,18 @@ async def generate_report(
     import uuid as _uuid
     report_id = str(_uuid.uuid4())
 
+    if _db.pool is not None:
+        import datetime as _dt
+        async with acquire_for_client(resolved_client_id) as conn:
+            await conn.execute(
+                """INSERT INTO reports (id, client_id, report_type, created_at)
+                   VALUES ($1, $2, $3, $4)""",
+                _uuid.UUID(report_id),
+                resolved_client_id,
+                report_type,
+                _dt.datetime.now(_dt.timezone.utc),
+            )
+
     async def _run():
         if _db.pool is None:
             return

@@ -320,7 +320,7 @@ async def test_run_full_pipeline_persists(db_pool, admin_conn, monkeypatch):
 
         # classify call, then context call
         classify_json = json.dumps([
-            {"signal_type": "pricing", "urgency": "critical"},
+            {"signal_type": "pricing_change", "urgency": "critical"},
             {"signal_type": "news", "urgency": "medium"},
         ])
         context_json = json.dumps([
@@ -338,7 +338,7 @@ async def test_run_full_pipeline_persists(db_pool, admin_conn, monkeypatch):
         )
         assert len(rows) == 2
         assert rows[0]["competitor_name"] == "Acme"
-        assert rows[0]["signal_type"] == "pricing"
+        assert rows[0]["signal_type"] == "pricing_change"
         assert rows[0]["urgency"] == "critical"
         assert "starter" in rows[0]["strategic_context"]
         assert rows[1]["competitor_name"] == "Globex"

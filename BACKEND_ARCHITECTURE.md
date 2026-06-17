@@ -133,13 +133,12 @@ In-process `BackgroundTasks` do **not** survive a container restart and offer no
 
 ## 7. SSE endpoint (ADR-012 / CLAUDE §12) — backend side
 
-The backend hosts `GET /stream/insights` returning a `StreamingResponse(media_type="text/event-stream")` (CLAUDE §12). The sanctioned detection mechanism is a **server-side check every 5s** inside the SSE generator that pushes when a new insight exists for the tenant:
-```python
-yield f"data: {json.dumps(new_insight)}\n\n"
-```
-- This is **server-side** polling (the sanctioned mechanism), **not** client polling — client-side polling of REST to simulate real-time is forbidden (CLAUDE §12; NFR-06).
-- The stream is **tenant-scoped** (the generator reads only the authenticated tenant's new insights via the pool helper).
-- **Accept-with-mitigation (AUD-07/RISK-13):** the 5s per-connection poll scales poorly with many concurrent dashboards; cap/backoff connections for MVP, and plan an **event-on-persist** notification post-MVP rather than abandoning SSE (ADR-012 future constraint). Consumption side: FRONTEND §6.
+The backend hosts `GET /stream/insights` returning a `StreamingResponse(media_type="text/event-stream")`. The sanctioned detection mechanism uses a central `realtime_events` table and PostgreSQL `LISTEN/NOTIFY`:
+- **Event Broker Pattern:** A single global app-level listener receives PostgreSQL notifications on `realtime_events_channel` and fans them out to tenant subscriber queues. This prevents long-lived tenant connections and pool exhaustion per browser tab.
+- **Tenant Isolation:** Event filtering is strictly tenant-scoped by `client_id` inside the broker.
+- **Durable Catch-Up:** Replay of missed events uses the `Last-Event-ID` header.
+- **Publishers:** Webhook, manual, and scheduled sources publish tenant-scoped events (`raw_feedback.created`, `agent_job.started`, `feedback_insight.created`, `report.created`). Fast real-time updates require webhook support from the source.
+- **Responsibilities:** n8n owns schedules/delivery, FastAPI/LangGraph owns intelligence and event processing.
 
 ---
 

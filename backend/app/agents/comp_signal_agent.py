@@ -388,11 +388,11 @@ async def store_node(state: CompSignalState) -> dict:
             urgency = sig.get("urgency")
             if urgency not in _VALID_URGENCY:
                 urgency = "low"
-            await conn.execute(
+            new_id = await conn.fetchval(
                 "INSERT INTO competitive_signals "
                 "(client_id, competitor_name, signal_type, signal_source, "
                 " raw_content, strategic_context, urgency) "
-                "VALUES ($1, $2, $3, $4, $5, $6, $7)",
+                "VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id",
                 state["client_id"],
                 sig.get("competitor_name"),
                 sig.get("signal_type"),
@@ -401,6 +401,8 @@ async def store_node(state: CompSignalState) -> dict:
                 sig.get("strategic_context"),
                 urgency,
             )
+            from app.services.realtime_service import publish_event
+            await publish_event(state["client_id"], "competitive_signal.created", str(new_id), {"competitor": sig.get("competitor_name")})
 
     logger.info(
         '{"event": "compsig.stored", "client_id": "%s", "count": %d}',

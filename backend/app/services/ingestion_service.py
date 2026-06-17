@@ -107,6 +107,8 @@ async def _store_feedback(client_id: UUID, source_id: UUID, records: list[dict])
             )
             if status == "INSERT 0 1":
                 inserted += 1
+                from app.services.realtime_service import publish_event
+                await publish_event(client_id, "raw_feedback.created", str(r.get("id") or ""), {"source": metadata.get("source_type")})
     return inserted
 
 
@@ -133,6 +135,8 @@ async def _store_events(client_id: UUID, records: list[dict]) -> int:
             )
             if status == "INSERT 0 1":
                 inserted += 1
+                from app.services.realtime_service import publish_event
+                await publish_event(client_id, "journey_event.created", m.get("session_id"), {"event_type": event_type})
     return inserted
 
 
@@ -160,12 +164,16 @@ async def run_ingestion(client_id: UUID) -> dict:
         if tool is None or tool.category not in _INGESTED_CATEGORIES:
             continue
         try:
+            from app.services.realtime_service import publish_event
+            await publish_event(client_id, "data_source.sync_started", str(source["id"]), {"source_type": source_type})
             tool_input = {"client_id": client_id, **_config_args(tool, source["config"])}
             records = await tool.arun(tool_input)
         except Exception as exc:
             logger.warning(
                 "ingestion: tool %s failed for client %s: %s", tool.name, client_id, exc
             )
+            from app.services.realtime_service import publish_event
+            await publish_event(client_id, "data_source.sync_failed", str(source["id"]), {"source_type": source_type, "error": str(exc)[:200]})
             continue
         if not records:
             processed.append(source_type)
@@ -185,6 +193,8 @@ async def run_ingestion(client_id: UUID) -> dict:
                 source["id"],
                 client_id,
             )
+        from app.services.realtime_service import publish_event
+        await publish_event(client_id, "data_source.sync_completed", str(source["id"]), {"source_type": source_type})
 
     logger.info(
         '{"event": "ingestion.complete", "client_id": "%s", '

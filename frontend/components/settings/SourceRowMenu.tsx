@@ -1,11 +1,13 @@
 "use client";
 
 import * as React from "react";
+import { createPortal } from "react-dom";
 import { MoreVertical, RefreshCw, Settings2, Trash2 } from "lucide-react";
 import { cn, focusRing } from "@/lib/utils";
 import { useToast } from "@/components/ui/Toast";
 
-import { removeSourceAction, resyncSourceAction, editSourceSettingsAction } from "@/app/(dashboard)/settings/actions";
+import { removeSourceAction, resyncSourceAction } from "@/app/(dashboard)/settings/actions";
+import { EditConnectionModal } from "@/components/settings/EditConnectionModal";
 
 /**
  * Per-source ··· menu. The destructive "Disconnect" is a two-step guard:
@@ -15,17 +17,20 @@ import { removeSourceAction, resyncSourceAction, editSourceSettingsAction } from
 export function SourceRowMenu({
   sourceId,
   sourceName,
-  onEdit,
+  sourceConfig,
 }: {
   sourceId: string;
   sourceName: string;
-  onEdit?: () => void;
+  sourceConfig?: Record<string, any>;
 }) {
   const { toast } = useToast();
   const [open, setOpen] = React.useState(false);
+  const [editModalOpen, setEditModalOpen] = React.useState(false);
   const [arming, setArming] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
   const ref = React.useRef<HTMLDivElement>(null);
+
+  const [coords, setCoords] = React.useState({ top: 0, left: 0 });
 
   // Reset the guard whenever the menu closes.
   React.useEffect(() => {
@@ -34,12 +39,35 @@ export function SourceRowMenu({
 
   React.useEffect(() => {
     if (!open) return;
-    const onDoc = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    const onDoc = (e: MouseEvent | Event) => {
+      // If we clicked inside the portal, don't close. 
+      // Actually we attach the ref to the button, and another ref to the menu.
+      if (ref.current && ref.current.contains(e.target as Node)) return;
+      if (menuRef.current && menuRef.current.contains(e.target as Node)) return;
+      setOpen(false);
     };
     document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
+    document.addEventListener("scroll", onDoc, true); // capture scroll to close
+    window.addEventListener("resize", onDoc);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("scroll", onDoc, true);
+      window.removeEventListener("resize", onDoc);
+    };
   }, [open]);
+
+  const handleOpen = (e: React.MouseEvent) => {
+    if (open) {
+      setOpen(false);
+      return;
+    }
+    const rect = e.currentTarget.getBoundingClientRect();
+    setCoords({
+      top: rect.bottom,
+      left: rect.right - 192, // 192px = w-48
+    });
+    setOpen(true);
+  };
 
   const handleDisconnect = async () => {
     if (!arming) {
@@ -71,39 +99,33 @@ export function SourceRowMenu({
     }
   };
 
-  const handleEdit = async () => {
+  const handleEdit = () => {
     setOpen(false);
-    if (onEdit) {
-      onEdit();
-      return;
-    }
-    setLoading(true);
-    try {
-      await editSourceSettingsAction(sourceId);
-      toast(`${sourceName} settings updated`, "success");
-    } catch {
-      toast(`Failed to update ${sourceName} settings`, "error");
-    } finally {
-      setLoading(false);
-    }
+    setEditModalOpen(true);
   };
 
-  return (
-    <div ref={ref} className="relative inline-block">
-      <button
-        onClick={() => setOpen((o) => !o)}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        disabled={loading}
-        className={cn("grid size-8 place-items-center rounded-lg text-slate-400 transition-[transform,colors] duration-200 ease-out active:scale-95 hover:bg-slate-700 hover:text-white disabled:opacity-50", focusRing)}
-      >
-        <MoreVertical className="size-4" />
-      </button>
+  const menuRef = React.useRef<HTMLDivElement>(null);
 
-      {open && (
+  return (
+    <>
+      <div ref={ref} className="relative inline-block">
+        <button
+          onClick={handleOpen}
+          aria-haspopup="menu"
+          aria-expanded={open}
+          disabled={loading}
+          className={cn("grid size-8 place-items-center rounded-lg text-slate-400 transition-[transform,colors] duration-200 ease-out active:scale-95 hover:bg-slate-700 hover:text-white disabled:opacity-50", focusRing)}
+        >
+          <MoreVertical className="size-4" />
+        </button>
+      </div>
+
+      {open && typeof document !== "undefined" && createPortal(
         <div
+          ref={menuRef}
           role="menu"
-          className="absolute right-0 z-30 mt-1 w-48 overflow-hidden rounded-xl border border-slate-700 bg-slate-800 py-1 shadow-xl shadow-black/40"
+          style={{ top: coords.top + 4, left: coords.left }}
+          className="fixed z-[100] w-48 overflow-hidden rounded-xl border border-slate-700 bg-slate-800 py-1 shadow-2xl shadow-black/60 animate-in fade-in zoom-in-95 duration-150"
         >
           <button
             role="menuitem"
@@ -139,8 +161,19 @@ export function SourceRowMenu({
             <Trash2 className="size-4" />
             {arming ? "Confirm disconnect?" : "Disconnect"}
           </button>
-        </div>
+        </div>,
+        document.body
       )}
-    </div>
+
+      {editModalOpen && (
+        <EditConnectionModal
+          sourceId={sourceId}
+          sourceType={sourceName}
+          sourceConfig={sourceConfig || {}}
+          isOpen={editModalOpen}
+          onClose={() => setEditModalOpen(false)}
+        />
+      )}
+    </>
   );
 }
