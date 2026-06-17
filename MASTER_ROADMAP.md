@@ -6,9 +6,13 @@
 > Guide for Junex.
 > **Contains all five PHASE-0 deliverables:** §1 Requirements Traceability Matrix · §2 Architecture
 > Audit · §3 Risk Assessment · §4 Dependency Graph · §5 Roadmap & Execution Strategy.
-> **Status (updated 2026-06-18):** Roadmap approved; execution complete for all local phases.
-> **Phases 0–8, 10 ✓ COMPLETE.** All components (Agents, MCP Tools, n8n, RAG, Next.js Dashboard, API) 
-> are implemented, wired, and tested locally (335 backend tests, 10 frontend tests green). 
+> **Status (updated 2026-06-18):** Roadmap approved; execution heavily progressed.
+> **Phases 0–3 ✓ COMPLETE.** Foundations (Repo, DB, FastAPI, Auth) are solid.
+> **P4 (Agents):** ◧ CODE-COMPLETE, pending live LangSmith/OpenAI verification.
+> **P5 (MCP Tools):** ✓ COMPLETE, with some scraper tools degraded pending legal review.
+> **P6 (n8n/Reports):** ◧ MOSTLY IMPLEMENTED, pending live n8n/Resend/Slack/report verification.
+> **P7 (RAG):** ◧ CODE-COMPLETE, pending real OpenAI quota/RAG verification.
+> **P8 (Portal):** ◧ FRONTEND IMPLEMENTED, pending full E2E verification.
 > **Phase 9 (AWS Production Deployment) ▢ NOT STARTED.** This is the only remaining engineering phase.
 > Per-phase markers in §5 reflect actual repository state.
 > **Version:** 1.0 | June 2026 | Confidential — Engineering Use Only
