@@ -32,7 +32,7 @@ def _strip_html(body: str) -> str:
 
 class IntercomFetchInput(BaseModel):
     client_id: UUID = Field(description="Tenant UUID — must match the authenticated client")
-    since_hours: int = Field(default=24, description="Fetch conversations updated in the last N hours")
+    since_hours: int = Field(default=720, description="Fetch conversations updated in the last N hours")
 
 
 class IntercomConversationsTool(DataAutomatedBaseTool):
@@ -48,7 +48,7 @@ class IntercomConversationsTool(DataAutomatedBaseTool):
     async def _arun(
         self,
         client_id: UUID,
-        since_hours: int = 24,
+        since_hours: int = 720,
         run_manager: Any = None,
         **kwargs: Any,
     ) -> list[dict]:

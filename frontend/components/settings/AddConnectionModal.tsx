@@ -19,6 +19,7 @@ interface CredField {
   required: boolean;
   textarea?: boolean;
   hint?: string;
+  target?: 'credentials' | 'config';
 }
 
 const CRED_FIELDS: Record<string, CredField[]> = {
@@ -30,6 +31,8 @@ const CRED_FIELDS: Record<string, CredField[]> = {
   typeform: [
     { key: 'access_token', label: 'Personal Access Token', placeholder: 'tfp_…', required: true,
       hint: 'Typeform → Account Settings → Personal Tokens' },
+    { key: 'form_id', label: 'Form ID', placeholder: 'abc123XYZ', required: true,
+      hint: 'Typeform → Open the form → copy the form ID from the URL', target: 'config' },
   ],
   intercom: [
     { key: 'access_token', label: 'Access Token', placeholder: 'Intercom access token', required: true,
@@ -139,7 +142,26 @@ export function AddConnectionModal({ onAdd }: { onAdd?: () => void }) {
     setError(null);
     setLoading(true);
     try {
-      await createConnectionAction(selected!.id, fields);
+      const defs = CRED_FIELDS[selected!.id] ?? [];
+      const credentials: Record<string, string> = {};
+      const config: Record<string, string> = {};
+
+      for (const def of defs) {
+        const raw = fields[def.key] ?? '';
+        const value = raw.trim();
+        if (!value) continue;
+        if (def.target === 'config') {
+          config[def.key] = value;
+        } else {
+          credentials[def.key] = value;
+        }
+      }
+
+      await createConnectionAction(
+        selected!.id,
+        credentials,
+        Object.keys(config).length > 0 ? config : undefined,
+      );
       closeAll();
       onAdd?.();
       router.refresh();

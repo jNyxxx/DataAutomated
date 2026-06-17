@@ -24,6 +24,11 @@ async def run():
         print("Running VoC analysis...")
         await run_voc_analysis(client_id)
         print("VoC analysis complete.")
+        
+        from app.agents.comp_signal_agent import run_comp_signal_analysis
+        print("Running Comp Signal analysis...")
+        await run_comp_signal_analysis(client_id)
+        print("Comp Signal analysis complete.")
     finally:
         await database.close_pool()
 

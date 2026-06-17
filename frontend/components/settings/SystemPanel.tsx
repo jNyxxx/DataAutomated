@@ -57,9 +57,9 @@ function JobRow({ job }: { job: AgentJob }) {
       </td>
       <td className="px-3 py-2.5 text-slate-400 text-xs">{timeAgo}</td>
       <td className="px-3 py-2.5 text-slate-400 text-xs">{job.attempts}/{job.max_attempts}</td>
-      <td className="px-3 py-2.5 max-w-[220px]">
+      <td className="px-3 py-2.5 max-w-xs break-words">
         {job.last_error ? (
-          <p className="truncate text-xs text-red-300" title={job.last_error}>{job.last_error}</p>
+          <p className="text-xs text-red-300" title={job.last_error}>{job.last_error}</p>
         ) : (
           <span className="text-xs text-slate-600">—</span>
         )}

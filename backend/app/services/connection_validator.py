@@ -86,12 +86,15 @@ async def _validate_zendesk(creds: dict) -> tuple[bool, str | None]:
     return False, _map_status(r.status_code, "zendesk")
 
 
-async def _validate_typeform(creds: dict) -> tuple[bool, str | None]:
+async def _validate_typeform(creds: dict, config: dict | None = None) -> tuple[bool, str | None]:
     access_token = creds.get("access_token", "").strip()
     if not access_token:
         return False, "Personal Access Token is required."
+    form_id = (config or {}).get("form_id", "")
+    if not isinstance(form_id, str) or not form_id.strip():
+        return False, "Form ID is required so DataAutomated knows which Typeform responses to ingest."
 
-    url = "https://api.typeform.com/me"
+    url = f"https://api.typeform.com/forms/{form_id.strip()}"
     try:
         async with httpx.AsyncClient() as client:
             r = await _get(client, url, headers={"Authorization": f"Bearer {access_token}"})
@@ -104,6 +107,8 @@ async def _validate_typeform(creds: dict) -> tuple[bool, str | None]:
         return True, None
     if r.status_code == 401:
         return False, "Invalid Personal Access Token — generate a new one in Typeform account settings."
+    if r.status_code == 404:
+        return False, "Form ID not found or not accessible with this token — verify the form ID from the Typeform URL."
     return False, _map_status(r.status_code, "typeform")
 
 
@@ -434,6 +439,8 @@ async def validate_connection(
         return True, None
 
     try:
+        if source_type == "typeform":
+            return await validator(creds, config or {})
         return await validator(creds)
     except Exception:
         logger.exception("Unexpected error in validator for source_type=%r", source_type)
