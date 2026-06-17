@@ -103,6 +103,27 @@ async def lifespan(app: FastAPI):
                     raise
         except Exception as _exc:
             logger.warning("minio bucket init failed (will retry on next boot): %s", _exc)
+    # S3/MinIO startup banner
+    if settings.s3_endpoint_url:
+        if not settings.s3_public_endpoint_url:
+            logger.warning(
+                "S3_PUBLIC_ENDPOINT_URL is not set — MinIO presigned report URLs will use "
+                "the internal Docker hostname and won't be browser-reachable. "
+                "Add S3_PUBLIC_ENDPOINT_URL=http://localhost:9000 to .env (ISSUE-07)."
+            )
+        else:
+            logger.info(
+                "MinIO mode — internal: %s · public: %s · bucket: %s",
+                settings.s3_endpoint_url,
+                settings.s3_public_endpoint_url,
+                settings.s3_reports_bucket,
+            )
+    else:
+        logger.info(
+            "S3 mode — region: %s · bucket: %s (IAM task role)",
+            settings.aws_region,
+            settings.s3_reports_bucket,
+        )
     # Retry sweeper — re-dispatch failed agent jobs every 120s (Phase 6 DLQ).
     # Runs as a background task; errors are logged inside sweep_failed_jobs and
     # never kill the application. The loop exits cleanly when the task is cancelled
