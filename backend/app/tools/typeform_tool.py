@@ -50,7 +50,7 @@ def _flatten_answers(answers: list) -> str:
 class TypeformFetchInput(BaseModel):
     client_id: UUID = Field(description="Tenant UUID — must match the authenticated client")
     form_id: str = Field(description="Typeform form ID to fetch responses from")
-    since_hours: int = Field(default=24, description="Fetch responses submitted in the last N hours")
+    since_hours: int = Field(default=720, description="Fetch responses submitted in the last N hours")
 
 
 class TypeformResponseTool(DataAutomatedBaseTool):
@@ -67,7 +67,7 @@ class TypeformResponseTool(DataAutomatedBaseTool):
         self,
         client_id: UUID,
         form_id: str,
-        since_hours: int = 24,
+        since_hours: int = 720,
         run_manager: Any = None,
         **kwargs: Any,
     ) -> list[dict]:
