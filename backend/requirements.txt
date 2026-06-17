@@ -29,7 +29,7 @@ httpx>=0.27,<1.0
 
 # ---- Testing (CLAUDE §16) ----
 pytest>=9.0.3,<10.0
-pytest-asyncio>=0.23,<1.0
+pytest-asyncio>=1.4.0,<2.0
 
 # ---- Phase 4 deps (agents + LangSmith observability) ----
 # Pinned to bounded ranges (supply-chain hygiene — no unbounded versions). Ranges include the
