@@ -12,7 +12,7 @@ class EventBroker:
         self._conn = None
 
     def subscribe(self, client_id: UUID) -> asyncio.Queue:
-        q = asyncio.Queue()
+        q = asyncio.Queue(maxsize=100)
         if client_id not in self.queues:
             self.queues[client_id] = set()
         self.queues[client_id].add(q)
@@ -54,8 +54,18 @@ class EventBroker:
             data = json.loads(payload)
             client_id = UUID(str(data.get("client_id")))
             if client_id in self.queues:
-                for q in self.queues[client_id]:
-                    q.put_nowait(data)
+                for q in list(self.queues[client_id]):
+                    try:
+                        q.put_nowait(data)
+                    except asyncio.QueueFull:
+                        logger.warning("EventBroker queue full for client %s, forcing disconnect", client_id)
+                        try:
+                            # Drain an item to make room for the disconnect message
+                            q.get_nowait()
+                            q.put_nowait({"error": "queue_full", "disconnect": True})
+                        except Exception:
+                            pass
+                        self.unsubscribe(client_id, q)
         except Exception as e:
             logger.warning("EventBroker payload parse failed: %s", e)
 
@@ -70,6 +80,7 @@ async def publish_event(
     """
     Publish a real-time event.
     This inserts a row into the realtime_events table, which triggers a pg_notify.
+    Uses acquire_for_client for secure, tenant-scoped insert.
     """
     from app import database
     if database.pool is None:
@@ -78,7 +89,7 @@ async def publish_event(
 
     payload_json = json.dumps(payload or {})
     try:
-        async with database.pool.acquire() as conn:
+        async with database.acquire_for_client(client_id) as conn:
             await conn.execute(
                 "INSERT INTO realtime_events (client_id, event_type, entity_id, payload) "
                 "VALUES ($1, $2, $3, $4::jsonb)",

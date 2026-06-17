@@ -305,6 +305,8 @@ async def stream_insights(
                         )
                     for row in missed_rows:
                         evt_data = _row_dict(row)
+                        if "client_id" in evt_data:
+                            del evt_data["client_id"]
                         if isinstance(evt_data.get('payload'), str):
                             evt_data['payload'] = json.loads(evt_data['payload'])
                         yield f"id: {evt_data['id']}\nevent: {evt_data['event_type']}\ndata: {json.dumps(evt_data)}\n\n"
@@ -314,6 +316,9 @@ async def stream_insights(
             while True:
                 try:
                     data = await asyncio.wait_for(queue.get(), timeout=15.0)
+                    if data.get("disconnect"):
+                        yield f"event: error\ndata: {json.dumps(data)}\n\n"
+                        break
                     if "client_id" in data:
                         del data["client_id"]
                     yield f"id: {data.get('id')}\nevent: {data.get('event_type')}\ndata: {json.dumps(data)}\n\n"

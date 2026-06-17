@@ -32,7 +32,7 @@ class TestSseAuth:
 class TestEventBroker:
     async def test_publish_event_inserts_row_and_notifies(self, tx_conn):
         client_id = uuid4()
-        await tx_conn.execute("INSERT INTO clients (id, name, created_at) VALUES ($1, 'test', now())", client_id)
+        await tx_conn.execute("INSERT INTO clients (id, name, email, created_at) VALUES ($1, 'test', $2, now())", client_id, f"{client_id}@example.com")
         
         entity_id = str(uuid4())
         # We simulate the DB insert since pool might not be running in this test context
@@ -74,10 +74,68 @@ class TestEventBroker:
         broker.unsubscribe(client_b, qb)
 
     async def test_last_event_id_catchup(self, tx_conn):
-        client_id = uuid4()
-        await tx_conn.execute("INSERT INTO clients (id, name, created_at) VALUES ($1, 'test', now())", client_id)
+        from app.database import acquire_for_client
         
+        client_id = uuid4()
+        await tx_conn.execute("INSERT INTO clients (id, name, email, created_at) VALUES ($1, 'test', $2, now())", client_id, f"{client_id}@example.com")
+        
+        # Another client to ensure we don't catch up their events
+        client_b = uuid4()
+        await tx_conn.execute("INSERT INTO clients (id, name, email, created_at) VALUES ($1, 'test b', $2, now())", client_b, f"{client_b}@example.com")
+
         e1_id = uuid4()
         e2_id = uuid4()
-        await tx_conn.execute("INSERT INTO realtime_events (id, client_id, event_type, entity_id, payload) VALUES ($1, $2, 'test1', '1', '{}')", e1_id, client_id)
-        await tx_conn.execute("INSERT INTO realtime_events (id, client_id, event_type, entity_id, payload) VALUES ($1, $2, 'test2', '2', '{}')", e2_id, client_id)
+        e3_b_id = uuid4()
+        
+        # E1 is the last seen
+        await tx_conn.execute("INSERT INTO realtime_events (id, client_id, event_type, entity_id, payload, created_at) VALUES ($1, $2, 'test1', '1', '{}', now() - interval '2 min')", e1_id, client_id)
+        # E2 is missed by client A
+        await tx_conn.execute("INSERT INTO realtime_events (id, client_id, event_type, entity_id, payload, created_at) VALUES ($1, $2, 'test2', '2', '{}', now() - interval '1 min')", e2_id, client_id)
+        # E3 belongs to B
+        await tx_conn.execute("INSERT INTO realtime_events (id, client_id, event_type, entity_id, payload, created_at) VALUES ($1, $2, 'test_b', 'b', '{}', now())", e3_b_id, client_b)
+
+        # Let's perform the catchup query logic directly to verify it works exactly as the route
+        await tx_conn.execute("SET LOCAL ROLE app_runtime")
+        await tx_conn.execute(f"SET LOCAL app.current_client_id = '{client_id}'")
+        
+        missed_rows = await tx_conn.fetch(
+            "SELECT id, event_type, entity_id, payload, created_at "
+            "FROM realtime_events "
+            "WHERE client_id = $1 AND created_at > ("
+            "   SELECT created_at FROM realtime_events WHERE id = $2 AND client_id = $1"
+            ") ORDER BY created_at ASC",
+            client_id, e1_id
+        )
+        
+        assert len(missed_rows) == 1
+        assert missed_rows[0]["id"] == e2_id
+        assert missed_rows[0]["event_type"] == "test2"
+        # ensure client B's event is perfectly isolated
+        
+    async def test_bounded_queue_drops_client_on_full(self):
+        client_id = uuid4()
+        q = broker.subscribe(client_id)
+        assert q.maxsize == 100
+        
+        # Fill it
+        for i in range(100):
+            q.put_nowait({"i": i})
+            
+        assert q.full()
+        
+        # This will trigger a QueueFull inside _on_notify
+        payload = json.dumps({"client_id": str(client_id), "event_type": "overflow", "id": str(uuid4())})
+        broker._on_notify(None, None, None, payload)
+        
+        # The client should be unsubscribed
+        assert client_id not in broker.queues
+        
+        # The queue should have had 1 item drained and a disconnect message added
+        items = []
+        while not q.empty():
+            items.append(q.get_nowait())
+            
+        assert len(items) == 100
+        # The last item should be the disconnect message
+        assert items[-1].get("disconnect") is True
+        assert items[-1].get("error") == "queue_full"

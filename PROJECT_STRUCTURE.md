@@ -43,6 +43,7 @@ dataautomated/
 │   │   └── services/               # Business logic layer
 │   │       ├── nlp_service.py
 │   │       ├── embedding_service.py
+│   │       ├── realtime_service.py   # EventBroker and real-time events
 │   │       └── report_service.py
 │   ├── requirements.txt
 │   └── Dockerfile
@@ -75,7 +76,7 @@ Each folder has **one** responsibility; code that does not match is misplaced re
 | `backend/app/config.py` | Environment config via `pydantic-settings`; no hardcoded secrets | Secrets come from env / Secrets Manager only (CLAUDE §14) | INFRASTRUCTURE §6 |
 | `backend/app/database.py` | The single asyncpg connection **pool** and the tenant-context-on-checkout helper | All DB access goes through here; no ad-hoc `asyncpg.connect` (AUD-05/08) | MULTI_TENANT_SECURITY §4, BACKEND §5 |
 | `backend/app/models/` | SQLAlchemy ORM models **for migrations/typing only** | Not a runtime query path (AUD-03, D2) | DATABASE_FOUNDATION §6 |
-| `backend/app/routers/` | FastAPI route handlers, one module per domain | Thin: validate → call service/dispatch → return; no business logic | BACKEND §3 |
+| `backend/app/routers/` | FastAPI route handlers, one module per domain | Thin: validate → call service/dispatch → return; no business logic. SSE payloads strip `client_id` for tenant scope. | BACKEND §3 |
 | `backend/app/agents/` | The three LangGraph `StateGraph` agents — **and only these three** | No 4th agent / competing orchestration (ADR §6; CLAUDE §7) | AGENT §2 |
 | `backend/app/tools/` | MCP tool definitions (BaseTool subclasses) + registry/base | New external source = new tool here, never inline in an agent (ADR-009) | MCP §2 |
 | `backend/app/services/` | Business logic: NLP, embedding/RAG, report generation | The single embedding service lives only here (ADR-010) | BACKEND §3, RAG §2 |

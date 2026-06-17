@@ -147,6 +147,7 @@ async def lifespan(app: FastAPI):
     yield
     _sweep_task.cancel()
     _broker_task.cancel()
+    await _asyncio.gather(_sweep_task, _broker_task, return_exceptions=True)
     await close_pool()
 
 
