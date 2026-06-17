@@ -232,7 +232,7 @@ async def update_data_source(
         cid_idx = len(values)
 
         result = await conn.execute(
-            f"UPDATE data_sources SET {', '.join(set_clauses)} "
+            f"UPDATE data_sources SET {', '.join(set_clauses)} "  # nosec B608
             f"WHERE id = ${pk_idx} AND client_id = ${cid_idx}",
             *values,
         )

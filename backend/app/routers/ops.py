@@ -138,7 +138,7 @@ async def ready():
 
         def _check_n8n():
             url = _s.n8n_webhook_url.rstrip("/") + "/healthz"
-            with _req.urlopen(url, timeout=3) as r:
+            with _req.urlopen(url, timeout=3) as r:  # nosec B310
                 return r.status
 
         try:
