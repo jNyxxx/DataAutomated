@@ -124,12 +124,14 @@ export function AddConnectionModal({ onAdd }: { onAdd?: () => void }) {
     setSelected(null);
     setFields({});
     setError(null);
+    setLoading(false);
   }
 
   function selectPlatform(p: Platform) {
     setSelected(p);
     setFields({});
     setError(null);
+    setLoading(false);
   }
 
   async function handleConnect(e: React.FormEvent) {
