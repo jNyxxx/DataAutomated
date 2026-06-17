@@ -4,7 +4,7 @@ VoC Insights router (CLAUDE.md §10; prefix `/insights`, tag `VoC Insights`).
 Routes:
   POST /insights/analyze          — dispatch VoC agent (background, < 100ms)
   GET  /insights/latest           — latest feedback_insights row for the caller's client
-  GET  /stream/insights           — SSE stream; 5s server-side poll (CLAUDE.md §12)
+  GET  /stream/insights           — SSE stream; PostgreSQL LISTEN/NOTIFY realtime push (CLAUDE.md §12)
   POST /api/agents/voc/run        — n8n alias for /insights/analyze
   POST /api/ingest/trigger        — n8n ingest trigger (runs the MCP ingestion pipeline)
 
@@ -296,11 +296,26 @@ async def stream_insights(
                     last_id = UUID(last_event_id)
                     async with acquire_for_client(client_id) as conn:
                         missed_rows = await conn.fetch(
+                            # Deterministic catch-up cursor:
+                            #   >= anchor timestamp  — keeps events that share the
+                            #                          exact same created_at as the
+                            #                          last-seen event (timestamp collision).
+                            #   id != last_id        — excludes the anchor itself (no replay).
+                            #   COALESCE fallback    — if the anchor ID is not found (expired /
+                            #                          wrong tenant), fall back to 5 min of
+                            #                          history instead of silently returning 0 rows.
+                            #   ORDER BY (created_at, id) — fully deterministic when timestamps
+                            #                               collide (id is UUID, stable sort key).
                             "SELECT id, event_type, entity_id, payload, created_at "
                             "FROM realtime_events "
-                            "WHERE client_id = $1 AND created_at > ("
-                            "   SELECT created_at FROM realtime_events WHERE id = $2 AND client_id = $1"
-                            ") ORDER BY created_at ASC",
+                            "WHERE client_id = $1 "
+                            "  AND id != $2 "
+                            "  AND created_at >= COALESCE( "
+                            "        (SELECT created_at FROM realtime_events "
+                            "         WHERE id = $2 AND client_id = $1), "
+                            "        NOW() - INTERVAL '5 minutes' "
+                            "      ) "
+                            "ORDER BY created_at ASC, id ASC",
                             client_id, last_id
                         )
                     for row in missed_rows:

@@ -90,6 +90,7 @@ def _config_args(tool: Any, config: Any) -> dict:
 
 async def _store_feedback(client_id: UUID, source_id: UUID, records: list[dict]) -> int:
     inserted = 0
+    events_to_publish = []
     async with acquire_for_client(client_id) as conn:
         for r in records:
             content = (r.get("content") or "").strip()
@@ -107,13 +108,18 @@ async def _store_feedback(client_id: UUID, source_id: UUID, records: list[dict])
             )
             if status == "INSERT 0 1":
                 inserted += 1
-                from app.services.realtime_service import publish_event
-                await publish_event(client_id, "raw_feedback.created", str(r.get("id") or ""), {"source": metadata.get("source_type")})
+                events_to_publish.append((str(r.get("id") or ""), metadata.get("source_type")))
+                
+    from app.services.realtime_service import publish_event
+    for ext_id, source_type in events_to_publish:
+        await publish_event(client_id, "raw_feedback.created", ext_id, {"source": source_type})
+        
     return inserted
 
 
 async def _store_events(client_id: UUID, records: list[dict]) -> int:
     inserted = 0
+    events_to_publish = []
     async with acquire_for_client(client_id) as conn:
         for r in records:
             m = r.get("metadata") or {}
@@ -135,8 +141,12 @@ async def _store_events(client_id: UUID, records: list[dict]) -> int:
             )
             if status == "INSERT 0 1":
                 inserted += 1
-                from app.services.realtime_service import publish_event
-                await publish_event(client_id, "journey_event.created", m.get("session_id"), {"event_type": event_type})
+                events_to_publish.append((m.get("session_id"), event_type))
+                
+    from app.services.realtime_service import publish_event
+    for sess_id, ev_type in events_to_publish:
+        await publish_event(client_id, "journey_event.created", sess_id, {"event_type": ev_type})
+        
     return inserted
 
 

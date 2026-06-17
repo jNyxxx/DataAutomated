@@ -355,8 +355,8 @@ Next.js **App Router (14+)**, TypeScript strict, Tailwind, Recharts. Clean, fast
 
 - **Transport: Server-Sent Events (SSE).** Backend exposes `GET /stream/insights` → `StreamingResponse(media_type="text/event-stream")`; frontend uses `EventSource`.
 - **Format:** SSE `data:` frames of JSON (`yield f"data: {json.dumps(new_insight)}\n\n"`).
-- **Handling:** parse JSON, prepend to state, show a toast; `eventSource.close()` on unmount. The reference loop polls the DB every 5s server-side and pushes when a new insight exists.
-> **RULE — no polling-heavy solutions unless approved.** Client-side polling of REST to simulate real-time is **not** allowed; use SSE. (The 5s server-side check inside the SSE generator is the sanctioned mechanism. Replacing SSE with WebSockets or client polling requires approval.)
+- **Handling:** parse JSON, prepend to state, show a toast; `eventSource.close()` on unmount. The backend uses PostgreSQL `LISTEN/NOTIFY` (`realtime_events_channel`) to push events to the SSE generator immediately when written — no server-side polling loop.
+> **RULE — no polling-heavy solutions unless approved.** Client-side polling of REST to simulate real-time is **not** allowed; use SSE. (The PostgreSQL LISTEN/NOTIFY mechanism inside the SSE generator is the sanctioned mechanism. Replacing SSE with WebSockets or client polling requires approval.)
 
 ---
 

@@ -104,6 +104,20 @@ export function InsightStream({ onEvent }: InsightStreamProps) {
         // Heartbeat received
       });
 
+      // Named SSE `event: error` frames (queue_full / resync_required) sent by the
+      // server when the in-process queue overflows.  These are distinct from the
+      // EventSource connection-level onerror — distinguished by instanceof MessageEvent.
+      source.addEventListener('error', (e: Event) => {
+        if (!(e instanceof MessageEvent)) return; // connection error handled by onerror
+        try {
+          const data = JSON.parse((e as MessageEvent<string>).data);
+          if (data.error === 'queue_full' || data.disconnect || data.resync_required) {
+            // State is unreliable — hard-refetch all server components immediately.
+            router.refresh();
+          }
+        } catch { /* ignore malformed frames */ }
+      });
+
       source.onopen = () => {
         retryCount = 0; // Reset backoff
       };

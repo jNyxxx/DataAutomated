@@ -50,7 +50,8 @@ async def _auto_ingest_and_analyze(client_id: UUID) -> None:
         )
         if ingestion_count > 0 and settings.openai_api_key:
             from app.agents.voc_agent import run_voc_analysis
-            await run_voc_analysis(client_id)
+            from app.services.job_service import run_tracked
+            await run_tracked(client_id, "voc", run_voc_analysis(client_id))
     except Exception:
         logger.exception("_auto_ingest_and_analyze failed for client %s", client_id)
 

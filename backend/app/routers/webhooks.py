@@ -174,6 +174,7 @@ async def zendesk_webhook(
     if source_id is None:
         return {"status": "ignored", "reason": "no_active_zendesk_source"}
 
+    new_row = False
     async with acquire_for_client(resolved_client_id) as conn:
         result = await conn.execute(
             _DEDUP_WEBHOOK_FEEDBACK,
@@ -190,13 +191,15 @@ async def zendesk_webhook(
                 "via": "webhook",
             }),
         )
-        if result.endswith("1"):
-            from app.services.realtime_service import publish_event
-            await publish_event(resolved_client_id, "raw_feedback.created", str(ticket.get("id", "")), {"source": "zendesk"})
+        new_row = result.endswith("1")
         await conn.execute(
             "UPDATE data_sources SET last_synced_at = NOW() WHERE id = $1 AND client_id = $2",
             source_id, resolved_client_id,
         )
+    # Publish after the transaction commits so the row is visible to readers.
+    if new_row:
+        from app.services.realtime_service import publish_event
+        await publish_event(resolved_client_id, "raw_feedback.created", str(ticket.get("id", "")), {"source": "zendesk"})
     logger.info('{"event":"webhook.ingested","source":"zendesk","client_id":"%s"}', resolved_client_id)
     background_tasks.add_task(_auto_trigger_voc, client_id=resolved_client_id)
     return {"status": "accepted"}
@@ -247,6 +250,7 @@ async def typeform_webhook(
     if source_id is None:
         return {"status": "ignored", "reason": "no_active_typeform_source"}
 
+    new_row = False
     async with acquire_for_client(resolved_client_id) as conn:
         result = await conn.execute(
             _DEDUP_WEBHOOK_FEEDBACK,
@@ -262,13 +266,15 @@ async def typeform_webhook(
                 "via": "webhook",
             }),
         )
-        if result.endswith("1"):
-            from app.services.realtime_service import publish_event
-            await publish_event(resolved_client_id, "raw_feedback.created", form_response.get("token", ""), {"source": "typeform"})
+        new_row = result.endswith("1")
         await conn.execute(
             "UPDATE data_sources SET last_synced_at = NOW() WHERE id = $1 AND client_id = $2",
             source_id, resolved_client_id,
         )
+    # Publish after the transaction commits so the row is visible to readers.
+    if new_row:
+        from app.services.realtime_service import publish_event
+        await publish_event(resolved_client_id, "raw_feedback.created", form_response.get("token", ""), {"source": "typeform"})
     logger.info('{"event":"webhook.ingested","source":"typeform","client_id":"%s"}', resolved_client_id)
     background_tasks.add_task(_auto_trigger_voc, client_id=resolved_client_id)
     return {"status": "accepted"}
@@ -309,6 +315,7 @@ async def intercom_webhook(
     if source_id is None:
         return {"status": "ignored", "reason": "no_active_intercom_source"}
 
+    new_row = False
     async with acquire_for_client(resolved_client_id) as conn:
         result = await conn.execute(
             _DEDUP_WEBHOOK_FEEDBACK,
@@ -325,13 +332,15 @@ async def intercom_webhook(
                 "via": "webhook",
             }),
         )
-        if result.endswith("1"):
-            from app.services.realtime_service import publish_event
-            await publish_event(resolved_client_id, "raw_feedback.created", str(item.get("id", "")), {"source": "intercom"})
+        new_row = result.endswith("1")
         await conn.execute(
             "UPDATE data_sources SET last_synced_at = NOW() WHERE id = $1 AND client_id = $2",
             source_id, resolved_client_id,
         )
+    # Publish after the transaction commits so the row is visible to readers.
+    if new_row:
+        from app.services.realtime_service import publish_event
+        await publish_event(resolved_client_id, "raw_feedback.created", str(item.get("id", "")), {"source": "intercom"})
     logger.info('{"event":"webhook.ingested","source":"intercom","client_id":"%s"}', resolved_client_id)
     background_tasks.add_task(_auto_trigger_voc, client_id=resolved_client_id)
     return {"status": "accepted"}
