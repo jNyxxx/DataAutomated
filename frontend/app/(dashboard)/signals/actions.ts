@@ -5,7 +5,7 @@ import { addTrackedCompetitor, markSignalRead, triggerSignalAnalysis } from "@/l
 import { revalidatePath } from "next/cache";
 
 export async function addTrackedCompetitorAction(competitorName: string) {
-  const token = getTokenServerSide();
+  const token = await getTokenServerSide();
   if (!token) throw new Error("Unauthorized");
   if (!competitorName.trim()) throw new Error("Competitor name is required.");
 
@@ -21,14 +21,14 @@ export async function addTrackedCompetitorAction(competitorName: string) {
 }
 
 export async function markSignalReadAction(id: string) {
-  const token = getTokenServerSide();
+  const token = await getTokenServerSide();
   if (!token) throw new Error("Unauthorized");
   await markSignalRead(token, id, true);
   revalidatePath("/signals");
 }
 
 export async function triggerSignalAnalysisAction() {
-  const token = getTokenServerSide();
+  const token = await getTokenServerSide();
   if (!token) throw new Error("Unauthorized");
   return triggerSignalAnalysis(token, true);
 }

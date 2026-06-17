@@ -6,14 +6,14 @@ import type { CreateDataSourcePayload } from "@/lib/types";
 import { revalidatePath } from "next/cache";
 
 export async function removeSourceAction(id: string) {
-  const token = getTokenServerSide();
+  const token = await getTokenServerSide();
   if (!token) throw new Error("Unauthorized");
   await deleteDataSource(token, id, true);
   revalidatePath("/settings");
 }
 
 export async function resyncSourceAction(id: string) {
-  const token = getTokenServerSide();
+  const token = await getTokenServerSide();
   if (!token) throw new Error("Unauthorized");
   await testDataSource(token, id, true);
   revalidatePath("/settings");
@@ -22,7 +22,7 @@ export async function resyncSourceAction(id: string) {
 export async function testConnectionAction(
   id: string,
 ): Promise<{ connection_status: string; message?: string; error?: string }> {
-  const token = getTokenServerSide();
+  const token = await getTokenServerSide();
   if (!token) throw new Error("Unauthorized");
   const result = await testDataSource(token, id, true);
   revalidatePath("/settings");
@@ -33,7 +33,7 @@ export async function editSourceSettingsAction(
   id: string,
   payload?: Partial<CreateDataSourcePayload & { is_active: boolean }>,
 ) {
-  const token = getTokenServerSide();
+  const token = await getTokenServerSide();
   if (!token) throw new Error("Unauthorized");
   if (payload) {
     await updateDataSource(token, id, payload, true);
@@ -46,7 +46,7 @@ export async function createConnectionAction(
   credentials: Record<string, string>,
   config?: Record<string, unknown>,
 ) {
-  const token = getTokenServerSide();
+  const token = await getTokenServerSide();
   if (!token) throw new Error("Unauthorized");
   const source = await createDataSource(token, { source_type: sourceType, credentials, config }, true);
   try {
@@ -59,7 +59,7 @@ export async function createConnectionAction(
 }
 
 export async function inviteTeamMemberAction(email: string, role: string) {
-  const token = getTokenServerSide();
+  const token = await getTokenServerSide();
   if (!token) throw new Error("Unauthorized");
   const result = await createInvite(token, { email, role }, true);
   revalidatePath("/settings");
@@ -67,14 +67,14 @@ export async function inviteTeamMemberAction(email: string, role: string) {
 }
 
 export async function changeTeamMemberRoleAction(userId: string, role: string) {
-  const token = getTokenServerSide();
+  const token = await getTokenServerSide();
   if (!token) throw new Error("Unauthorized");
   await updateTeamMemberRole(token, userId, role, true);
   revalidatePath("/settings");
 }
 
 export async function updateOrgNameAction(name: string) {
-  const token = getTokenServerSide();
+  const token = await getTokenServerSide();
   if (!token) throw new Error("Unauthorized");
   const result = await updateOrgName(token, name, true);
   revalidatePath("/settings");
@@ -82,7 +82,7 @@ export async function updateOrgNameAction(name: string) {
 }
 
 export async function retryJobAction(jobId: string): Promise<{ status: string; job_id: string }> {
-  const token = getTokenServerSide();
+  const token = await getTokenServerSide();
   if (!token) throw new Error("Unauthorized");
   const result = await retryJob(token, jobId);
   revalidatePath("/settings");

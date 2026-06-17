@@ -6,7 +6,8 @@ export async function POST() {
   // so it cannot be replayed on another backend instance. Best-effort — the cookie is
   // always cleared even if the revocation call fails.
   try {
-    const token = cookies().get('access_token')?.value;
+    const cookieStore = await cookies();
+    const token = cookieStore.get('access_token')?.value;
     if (token) {
       const base =
         process.env.API_URL_INTERNAL ??

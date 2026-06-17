@@ -4,7 +4,7 @@ import { getTokenServerSide } from "@/lib/auth";
 import { generateReport, triggerVoCAnalysis } from "@/lib/api";
 
 export async function exportVocAction() {
-  const token = getTokenServerSide();
+  const token = await getTokenServerSide();
   if (!token) throw new Error("Unauthorized");
 
   const { report_id } = await generateReport(token, "weekly_voc", "last_7_days", true);
@@ -15,7 +15,7 @@ export async function exportVocAction() {
 }
 
 export async function triggerVoCAnalysisAction() {
-  const token = getTokenServerSide();
+  const token = await getTokenServerSide();
   if (!token) throw new Error("Unauthorized");
   return triggerVoCAnalysis(token, true);
 }

@@ -5,7 +5,7 @@ import { Sidebar } from '@/components/layout/Sidebar';
 import { InsightStream } from '@/components/realtime/InsightStream';
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
-  const token = getTokenServerSide();
+  const token = await getTokenServerSide();
   if (!token) redirect('/login');
 
   const clientInfo = await fetchClientInfo(token).catch(() => ({ name: "Your account", plan: "", email: "" }));

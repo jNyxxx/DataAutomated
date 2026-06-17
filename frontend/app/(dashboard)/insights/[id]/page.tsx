@@ -7,14 +7,15 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 
 interface InsightDetailPageProps {
-  params: { id: string };
+  params: Promise<{ id: string }>;
 }
 
 export default async function InsightDetailPage({ params }: InsightDetailPageProps) {
-  const token = getTokenServerSide()!;
+  const token = (await getTokenServerSide())!;
+  const resolvedParams = await params;
   let insight;
   try {
-    insight = await fetchInsightById(token, params.id);
+    insight = await fetchInsightById(token, resolvedParams.id);
   } catch {
     notFound();
   }

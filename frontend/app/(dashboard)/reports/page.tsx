@@ -79,7 +79,7 @@ const SCHEDULE = [
 const FORMATS = ['PDF', 'Email digest', 'Notion page', 'CSV data'];
 
 export default async function ReportsPage() {
-  const token = getTokenServerSide()!;
+  const token = (await getTokenServerSide())!;
   const [reportsRes, editionStats, insightsRes, clientInfo] = await Promise.all([
     fetchReports(token).catch(() => ({ reports: [] })),
     fetchEditionStats(token, 'last_7_days', true).catch(() => ({

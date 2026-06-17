@@ -7,16 +7,17 @@ import { Badge } from '@/components/ui/badge';
 import { format } from 'date-fns';
 
 interface JourneyDetailPageProps {
-  params: { id: string };
+  params: Promise<{ id: string }>;
 }
 
 export default async function JourneyDetailPage({ params }: JourneyDetailPageProps) {
-  const token = getTokenServerSide();
+  const token = await getTokenServerSide();
   if (!token) notFound();
 
+  const resolvedParams = await params;
   let journey;
   try {
-    journey = await fetchJourneyById(token, params.id);
+    journey = await fetchJourneyById(token, resolvedParams.id);
   } catch {
     notFound();
   }
@@ -25,7 +26,7 @@ export default async function JourneyDetailPage({ params }: JourneyDetailPagePro
     <div>
       <Header
         title={`Funnel Step: ${journey.funnel_step}`}
-        description={`Journey ID: ${params.id} · Analyzed ${format(new Date(journey.created_at), 'MMM d, yyyy')}`}
+        description={`Journey ID: ${resolvedParams.id} · Analyzed ${format(new Date(journey.created_at), 'MMM d, yyyy')}`}
         actions={<Badge variant="warning">{journey.friction_cause.replace(/_/g, ' ')}</Badge>}
       />
       

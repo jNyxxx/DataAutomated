@@ -12,7 +12,7 @@ import { revalidatePath } from "next/cache";
 export async function addCompetitorAction(
   name: string,
 ): Promise<{ ok: boolean; error?: string }> {
-  const token = getTokenServerSide();
+  const token = await getTokenServerSide();
   if (!token) return { ok: false, error: "Unauthorized" };
   try {
     await addTrackedCompetitor(token, name, true);
@@ -23,7 +23,7 @@ export async function addCompetitorAction(
 }
 
 export async function triggerAllAnalysisAction(): Promise<{ ok: boolean }> {
-  const token = getTokenServerSide();
+  const token = await getTokenServerSide();
   if (!token) return { ok: false };
   await Promise.allSettled([
     triggerVoCAnalysis(token, true),

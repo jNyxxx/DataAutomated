@@ -16,7 +16,7 @@ const DEVICE_COLORS = {
 } as const;
 
 export default async function JourneysPage() {
-  const token = getTokenServerSide()!;
+  const token = (await getTokenServerSide())!;
   const role = getUserRoleFromToken(token);
   const canTrigger = role !== 'viewer';
   const [data, clientInfo, deviceData] = await Promise.all([

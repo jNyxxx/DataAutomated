@@ -22,7 +22,7 @@ const STATUS_BADGE: Record<string, [string, BadgeProps["variant"]]> = {
 };
 
 export default async function SettingsPage() {
-  const token = getTokenServerSide()!;
+  const token = (await getTokenServerSide())!;
   const [dataSourcesResponse, clientInfo, teamResponse, currentUser, jobsResponse] = await Promise.all([
     fetchDataSources(token).catch(() => ({ sources: [] })),
     fetchClientInfo(token).catch(() => ({ name: "Your account", plan: "insight_starter", email: "" })),

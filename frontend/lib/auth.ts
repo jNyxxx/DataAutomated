@@ -4,9 +4,9 @@ import type { User } from './types';
 const COOKIE_NAME = 'access_token';
 
 // Server-side only — call from Server Components and Route Handlers
-export function getTokenServerSide(): string | null {
+export async function getTokenServerSide(): Promise<string | null> {
   try {
-    const cookieStore = cookies();
+    const cookieStore = await cookies();
     const token = cookieStore.get(COOKIE_NAME)?.value ?? null;
     if (!token) return null;
     if (isTokenExpired(token)) return null;

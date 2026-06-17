@@ -20,7 +20,7 @@ import { Button } from '@/components/ui/button';
 import { LiveRefresh } from '@/components/ui/live-refresh';
 const TINT = { voc: '#2dd4bf', comp: '#f43f5e', jrn: '#3b82f6', system: '#94a3b8' } as const;
 
-type Props = { searchParams: { [key: string]: string | string[] | undefined } };
+type Props = { searchParams: Promise<{ [key: string]: string | string[] | undefined }> };
 
 function formatSigned(value: number, digits = 2) {
   return `${value >= 0 ? '+' : '-'}${Math.abs(value).toFixed(digits)}`;
@@ -73,8 +73,9 @@ function topCompetitorFrom(signals: { competitor_name: string }[]) {
 export const dynamic = 'force-dynamic';
 
 export default async function DashboardPage({ searchParams }: Props) {
-  const period = typeof searchParams?.period === 'string' ? searchParams.period : 'last_30_days';
-  const token = getTokenServerSide()!;
+  const resolvedSearchParams = await searchParams;
+  const period = typeof resolvedSearchParams?.period === 'string' ? resolvedSearchParams.period : 'last_30_days';
+  const token = (await getTokenServerSide())!;
   const [summary, sourcesRes, insightsRes, signalsRes, journeysRes, clientInfo, signalOverviewRes] = await Promise.all([
     fetchDashboardSummary(token, period).catch(() => null),
     fetchDataSources(token).catch(() => ({ sources: [] })),

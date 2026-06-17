@@ -5,7 +5,7 @@ import { triggerJourneyAnalysis } from "@/lib/api";
 import { revalidatePath } from "next/cache";
 
 export async function triggerJourneyAnalysisAction(): Promise<{ ok: boolean; error?: string }> {
-  const token = getTokenServerSide();
+  const token = await getTokenServerSide();
   if (!token) return { ok: false, error: "Unauthorized" };
   try {
     await triggerJourneyAnalysis(token, true);

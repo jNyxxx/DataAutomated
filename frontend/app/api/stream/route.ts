@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getTokenServerSide } from '@/lib/auth';
 
 export async function GET(_request: NextRequest) {
-  const token = getTokenServerSide();
+  const token = await getTokenServerSide();
   if (!token) return new NextResponse('Unauthorized', { status: 401 });
 
   const configured = process.env.API_URL_INTERNAL;

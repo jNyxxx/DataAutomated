@@ -8,14 +8,15 @@ import { Badge } from '@/components/ui/badge';
 import { MarkReadButton } from '@/components/signals/SignalActions';
 
 interface SignalDetailPageProps {
-  params: { id: string };
+  params: Promise<{ id: string }>;
 }
 
 export default async function SignalDetailPage({ params }: SignalDetailPageProps) {
-  const token = getTokenServerSide()!;
+  const token = (await getTokenServerSide())!;
+  const resolvedParams = await params;
   let signal;
   try {
-    signal = await fetchSignalById(token, params.id);
+    signal = await fetchSignalById(token, resolvedParams.id);
   } catch {
     notFound();
   }

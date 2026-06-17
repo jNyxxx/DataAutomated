@@ -7,7 +7,7 @@ import { Badge, BADGE_STYLES } from '@/components/ui/badge';
 import { AddCompetitorButton, MarkReadButton, RunSignalAnalysisButton } from '@/components/signals/SignalActions';
 
 export default async function SignalsPage() {
-  const token = getTokenServerSide()!;
+  const token = (await getTokenServerSide())!;
   const role = getUserRoleFromToken(token);
   const canTrigger = role !== 'viewer';
   const [data, overview, clientInfo] = await Promise.all([

@@ -9,7 +9,7 @@ import { AnalyzeButton, ExportVocButton } from '@/components/insights/VocActions
 const TINT = { voc: "#2dd4bf" } as const;
 
 export default async function InsightsPage() {
-  const token = getTokenServerSide()!;
+  const token = (await getTokenServerSide())!;
   const role = getUserRoleFromToken(token);
   const canTrigger = role !== 'viewer';
   const [data, samplesData, clientInfo] = await Promise.all([

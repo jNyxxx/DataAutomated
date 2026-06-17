@@ -1,8 +1,8 @@
 import { redirect } from 'next/navigation';
 import { getTokenServerSide } from '@/lib/auth';
 
-export default function Home() {
-  const token = getTokenServerSide();
+export default async function Home() {
+  const token = await getTokenServerSide();
   if (token) {
     redirect('/dashboard');
   } else {

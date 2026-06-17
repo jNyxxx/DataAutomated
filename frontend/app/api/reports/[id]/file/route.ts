@@ -49,11 +49,12 @@ function inferFilename(id: string, contentType: string | null) {
 
 export async function GET(
   request: NextRequest,
-  context: { params: { id: string } },
+  context: { params: Promise<{ id: string }> },
 ) {
+  const resolvedParams = await context.params;
   const download = request.nextUrl.searchParams.get("download") === "1";
 
-  const token = getTokenServerSide();
+  const token = await getTokenServerSide();
   if (!token) {
     return NextResponse.json({ detail: "Unauthorized" }, { status: 401 });
   }
@@ -62,7 +63,7 @@ export async function GET(
   try {
     // For preview: request inline disposition so iframe can display without triggering
     // a browser download prompt. For the download button: use default (attachment).
-    const result = await fetchReportDownloadUrl(token, context.params.id, true, !download);
+    const result = await fetchReportDownloadUrl(token, resolvedParams.id, true, !download);
     downloadUrl = result.url;
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to resolve report file.";
@@ -86,7 +87,7 @@ export async function GET(
         return NextResponse.json({ detail: "Failed to load report." }, { status: 502 });
       }
       const contentType = upstream.headers.get("content-type") || "application/octet-stream";
-      const filename = inferFilename(context.params.id, contentType);
+      const filename = inferFilename(resolvedParams.id, contentType);
       const headers = new Headers();
       headers.set("content-type", contentType);
       headers.set("content-disposition", contentDisposition(filename, false));
@@ -117,7 +118,7 @@ export async function GET(
     const bytes = new Uint8Array(arrayBuf);
     const isPdf = bytes.length >= 4 && bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46;
     const contentType = isPdf ? "application/pdf" : "text/html; charset=utf-8";
-    const filename = inferFilename(context.params.id, contentType);
+    const filename = inferFilename(resolvedParams.id, contentType);
     const headers = new Headers();
     headers.set("content-type", contentType);
     headers.set("content-disposition", contentDisposition(filename, download));
@@ -132,14 +133,15 @@ export async function GET(
 
 export async function HEAD(
   _request: NextRequest,
-  context: { params: { id: string } },
+  context: { params: Promise<{ id: string }> },
 ) {
-  const token = getTokenServerSide();
+  const resolvedParams = await context.params;
+  const token = await getTokenServerSide();
   if (!token) {
     return NextResponse.json({ detail: "Unauthorized" }, { status: 401 });
   }
   try {
-    await fetchReportDownloadUrl(token, context.params.id, true);
+    await fetchReportDownloadUrl(token, resolvedParams.id, true);
     return new NextResponse(null, { status: 200, headers: { "cache-control": "no-store" } });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to resolve report file.";

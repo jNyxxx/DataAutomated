@@ -1,0 +1,19 @@
+# Exclude large directories from Docker build context
+node_modules/
+.next/
+out/
+dist/
+
+# Env files (secrets must never be baked into images)
+.env
+.env.local
+.env.*.local
+
+# Dev/editor artifacts
+.DS_Store
+.vscode/
+*.swp
+*.swo
+npm-debug.log*
+yarn-debug.log*
+*.tsbuildinfo
