@@ -51,6 +51,8 @@ export function FunnelDropOffChart({ data, height = 200 }: FunnelDropOffChartPro
           width={36}
         />
         <Tooltip
+          isAnimationActive={false}
+          wrapperStyle={{ zIndex: 1000, pointerEvents: 'none' }}
           contentStyle={{
             background: "#0f172a",
             border: "1px solid rgba(255,255,255,0.08)",

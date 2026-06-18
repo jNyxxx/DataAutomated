@@ -22,6 +22,8 @@ export function Sparkline({ points, data, color, height = 40 }: { points?: numbe
           <XAxis dataKey="label" hide />
           <YAxis domain={['auto', 'auto']} hide />
           <Tooltip
+            isAnimationActive={false}
+            wrapperStyle={{ zIndex: 1000, pointerEvents: 'none' }}
             cursor={{ stroke: "#334155", strokeWidth: 1 }}
             contentStyle={{
               background: "#0f172a",
@@ -65,6 +67,8 @@ export function Velocity({ data, color }: { data: { day: string, count: number }
           <XAxis dataKey="day" axisLine={false} tickLine={false} tick={{ fill: "#94a3b8", fontSize: 10 }} dy={5} />
           <YAxis hide />
           <Tooltip
+            isAnimationActive={false}
+            wrapperStyle={{ zIndex: 1000, pointerEvents: 'none' }}
             cursor={{ fill: 'rgba(255,255,255,0.05)' }}
             contentStyle={{
               background: "#0f172a",

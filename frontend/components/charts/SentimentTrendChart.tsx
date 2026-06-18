@@ -53,6 +53,8 @@ export function SentimentTrendChart({ data, height = 200 }: SentimentTrendChartP
           width={40}
         />
         <Tooltip
+          isAnimationActive={false}
+          wrapperStyle={{ zIndex: 1000, pointerEvents: 'none' }}
           cursor={{ stroke: "#334155", strokeWidth: 1 }}
           contentStyle={{
             background: "#0f172a",
