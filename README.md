@@ -40,6 +40,7 @@ python -m pytest -q
 | Backend (FastAPI) | http://localhost:8000 | health: `GET /health`; docs: `/docs` |
 | Frontend (Next.js) | http://localhost:3000 | App Router, server-first |
 | n8n | http://localhost:5678 | orchestration/delivery (basic auth) |
+| MinIO (S3) | http://localhost:9001 | Object storage console (API on 9000) |
 | Postgres + pgvector | localhost:5433 | `pgvector/pgvector:pg16`; inside Docker use `db:5432` |
 
 ## Handoff
