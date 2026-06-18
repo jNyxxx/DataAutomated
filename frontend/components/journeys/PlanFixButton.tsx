@@ -6,15 +6,16 @@ import { triggerJourneyAnalysisAction } from "@/app/(dashboard)/journeys/actions
 import { usePersistedStatus } from "@/hooks/usePersistedStatus";
 
 export function PlanFixButton() {
-  const [isPending, startTransition] = useTransition();
+  const [isPending, setIsPending] = useState(false);
   const { status, setStatus } = usePersistedStatus("journey_plan_fix");
   const [errorMsg, setErrorMsg] = useState("");
 
-  function handleClick() {
+  async function handleClick() {
     // Persist "queuing" immediately so that navigating away and returning
     // shows "Queued ✓" rather than resetting to idle.
     setStatus("queuing");
-    startTransition(async () => {
+    setIsPending(true);
+    try {
       const result = await triggerJourneyAnalysisAction();
       if (result.ok) {
         setStatus("queued");
@@ -22,7 +23,9 @@ export function PlanFixButton() {
         setStatus("error");
         setErrorMsg(result.error ?? "Unknown error");
       }
-    });
+    } finally {
+      setIsPending(false);
+    }
   }
 
   const isQueuing = isPending || status === "queuing";

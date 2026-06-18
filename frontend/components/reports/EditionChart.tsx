@@ -30,14 +30,20 @@ export function EditionChart({ data }: { data: { day: string; signals: number }[
           <YAxis hide domain={[0, "dataMax + 2"]} />
           <Tooltip
             cursor={{ stroke: "#334155", strokeWidth: 1 }}
-            contentStyle={{
-              background: "#0f172a",
-              border: "1px solid rgba(255,255,255,0.08)",
-              borderRadius: 8,
-              fontSize: 12,
-              color: "#e2e8f0",
+            content={({ active, payload, label }) => {
+              if (active && payload && payload.length) {
+                return (
+                  <div className="rounded-lg border border-white/10 bg-slate-900 p-2 text-xs shadow-xl z-50">
+                    <p className="font-semibold text-slate-200 mb-1">{label}</p>
+                    <div className="flex items-center gap-2">
+                      <span className="text-slate-400">Signals:</span>
+                      <span className="font-medium text-slate-200">{payload[0].value}</span>
+                    </div>
+                  </div>
+                );
+              }
+              return null;
             }}
-            labelStyle={{ color: "#94a3b8" }}
           />
           <Area
             type="monotone"

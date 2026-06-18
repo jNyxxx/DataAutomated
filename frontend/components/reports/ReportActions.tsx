@@ -185,8 +185,22 @@ export function ExportAllButton({ reportIds }: { reportIds: string[] }) {
       return;
     }
     setLoading(true);
-    reportIds.forEach((id) => {
-      window.open(`/api/reports/${id}/file?download=1`, "_blank", "noopener,noreferrer");
+    reportIds.forEach(async (id) => {
+      try {
+        const res = await fetch(`/api/reports/${id}/file?download=1`);
+        if (!res.ok) throw new Error("Network response was not ok");
+        const blob = await res.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `report-${id}.pdf`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+      } catch (err) {
+        toast(`Failed to download report ${id}`, "error");
+      }
     });
     toast(`Downloading ${reportIds.length} report(s)`, "success");
     setLoading(false);

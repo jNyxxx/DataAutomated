@@ -22,18 +22,20 @@ export function Sparkline({ points, data, color, height = 40 }: { points?: numbe
           <XAxis dataKey="label" hide />
           <YAxis domain={['auto', 'auto']} hide />
           <Tooltip
-            isAnimationActive={false}
-            wrapperStyle={{ zIndex: 1000, pointerEvents: 'none' }}
             cursor={{ stroke: "#334155", strokeWidth: 1 }}
-            contentStyle={{
-              background: "#0f172a",
-              border: "1px solid rgba(255,255,255,0.08)",
-              borderRadius: 8,
-              fontSize: 12,
-              color: "#e2e8f0",
+            content={({ active, payload }) => {
+              if (active && payload && payload.length) {
+                return (
+                  <div className="rounded-lg border border-white/10 bg-slate-900 p-2 text-xs shadow-xl">
+                    <div className="flex items-center gap-2">
+                      <span className="text-slate-400">Value:</span>
+                      <span className="font-medium text-slate-200">{payload[0].value}</span>
+                    </div>
+                  </div>
+                );
+              }
+              return null;
             }}
-            labelStyle={{ color: "#94a3b8" }}
-            formatter={(val: number) => [val, 'Value']}
           />
           <Area
             type="monotone"
@@ -67,18 +69,21 @@ export function Velocity({ data, color }: { data: { day: string, count: number }
           <XAxis dataKey="day" axisLine={false} tickLine={false} tick={{ fill: "#94a3b8", fontSize: 10 }} dy={5} />
           <YAxis hide />
           <Tooltip
-            isAnimationActive={false}
-            wrapperStyle={{ zIndex: 1000, pointerEvents: 'none' }}
             cursor={{ fill: 'rgba(255,255,255,0.05)' }}
-            contentStyle={{
-              background: "#0f172a",
-              border: "1px solid rgba(255,255,255,0.08)",
-              borderRadius: 8,
-              fontSize: 12,
-              color: "#e2e8f0",
+            content={({ active, payload, label }) => {
+              if (active && payload && payload.length) {
+                return (
+                  <div className="rounded-lg border border-white/10 bg-slate-900 p-2 text-xs shadow-xl">
+                    <p className="font-semibold text-slate-200 mb-1">{label}</p>
+                    <div className="flex items-center gap-2">
+                      <span className="text-slate-400">Count:</span>
+                      <span className="font-medium text-slate-200">{payload[0].value}</span>
+                    </div>
+                  </div>
+                );
+              }
+              return null;
             }}
-            labelStyle={{ color: "#94a3b8" }}
-            formatter={(val: number) => [val, 'Count']}
           />
           <Bar dataKey="count" radius={[6, 6, 0, 0]} maxBarSize={36}>
             {data.map((entry, index) => (

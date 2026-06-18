@@ -29,7 +29,17 @@ export function DownloadPdfButton({
   const onClick = async () => {
     setLoading(true);
     try {
-      window.open(downloadUrl, "_blank", "noopener,noreferrer");
+      const res = await fetch(downloadUrl);
+      if (!res.ok) throw new Error("Failed to download");
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `report-${reportId}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
     } catch (err: any) {
       toast(err?.message || "Failed to download report", "error");
     } finally {

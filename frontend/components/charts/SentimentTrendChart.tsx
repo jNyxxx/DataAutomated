@@ -53,19 +53,21 @@ export function SentimentTrendChart({ data, height = 200 }: SentimentTrendChartP
           width={40}
         />
         <Tooltip
-          isAnimationActive={false}
-          wrapperStyle={{ zIndex: 1000, pointerEvents: 'none' }}
           cursor={{ stroke: "#334155", strokeWidth: 1 }}
-          contentStyle={{
-            background: "#0f172a",
-            border: "1px solid rgba(255,255,255,0.08)",
-            borderRadius: 8,
-            fontSize: 12,
-            color: "#e2e8f0",
+          content={({ active, payload, label }) => {
+            if (active && payload && payload.length) {
+              return (
+                <div className="rounded-lg border border-white/10 bg-slate-900 p-2 text-xs shadow-xl z-50">
+                  <p className="font-semibold text-slate-200 mb-1">{format(new Date(label), 'MMM d, yyyy')}</p>
+                  <div className="flex items-center gap-2">
+                    <span className="text-slate-400">Sentiment:</span>
+                    <span className="font-medium text-slate-200">{(Number(payload[0].value) * 100).toFixed(1)}%</span>
+                  </div>
+                </div>
+              );
+            }
+            return null;
           }}
-          labelStyle={{ color: "#94a3b8" }}
-          formatter={(v: number) => [`${(v * 100).toFixed(1)}%`, 'Sentiment']}
-          labelFormatter={(l: string) => format(new Date(l), 'MMM d, yyyy')}
         />
         <Line
           type="monotone"

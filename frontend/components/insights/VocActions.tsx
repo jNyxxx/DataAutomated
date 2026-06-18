@@ -8,19 +8,20 @@ import { useToast } from "@/components/ui/Toast";
 
 export function AnalyzeButton({ canTrigger = true }: { canTrigger?: boolean }) {
   const { toast } = useToast();
-  const [isPending, startTransition] = React.useTransition();
+  const [isPending, setIsPending] = React.useState(false);
 
   if (!canTrigger) return null;
 
-  const onClick = () => {
-    startTransition(async () => {
-      try {
-        await triggerVoCAnalysisAction();
-        toast("VoC analysis queued — refresh in ~60s to see results.", "success");
-      } catch {
-        toast("Failed to queue analysis", "error");
-      }
-    });
+  const onClick = async () => {
+    setIsPending(true);
+    try {
+      await triggerVoCAnalysisAction();
+      toast("VoC analysis queued — refresh in ~60s to see results.", "success");
+    } catch {
+      toast("Failed to queue analysis", "error");
+    } finally {
+      setIsPending(false);
+    }
   };
 
   return (
@@ -33,17 +34,18 @@ export function AnalyzeButton({ canTrigger = true }: { canTrigger?: boolean }) {
 
 export function ExportVocButton() {
   const { toast } = useToast();
-  const [isPending, startTransition] = React.useTransition();
+  const [isPending, setIsPending] = React.useState(false);
 
-  const onClick = () => {
-    startTransition(async () => {
-      try {
-        const result = await exportVocAction();
-        toast(result.message, "success");
-      } catch {
-        toast("Failed to start VoC export", "error");
-      }
-    });
+  const onClick = async () => {
+    setIsPending(true);
+    try {
+      const result = await exportVocAction();
+      toast(result.message, "success");
+    } catch {
+      toast("Failed to start VoC export", "error");
+    } finally {
+      setIsPending(false);
+    }
   };
 
   return (
