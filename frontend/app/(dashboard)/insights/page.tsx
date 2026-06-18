@@ -55,7 +55,7 @@ export default async function InsightsPage() {
 
   // Sparkline from recent sentiment scores (oldest→newest)
   const sentimentSparkline = data.insights
-    .map(i => i.sentiment_score ?? 0)
+    .map(i => ({ value: i.sentiment_score ?? 0, label: i.created_at ? new Date(i.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '' }))
     .reverse();
 
   // Compute real deltas from last 2 insight rows
@@ -114,7 +114,7 @@ export default async function InsightsPage() {
               </span>
             )}
           </div>
-          <Sparkline points={sentimentSparkline} color={TINT.voc} height={72} />
+          <Sparkline data={sentimentSparkline} color={TINT.voc} height={72} />
         </section>
 
         <section className="rounded-xl bg-slate-800 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.05)] p-5">

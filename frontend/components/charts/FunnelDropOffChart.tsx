@@ -52,13 +52,15 @@ export function FunnelDropOffChart({ data, height = 200 }: FunnelDropOffChartPro
         />
         <Tooltip
           contentStyle={{
-            background: 'hsl(var(--card))',
-            border: '1px solid hsl(var(--border))',
-            borderRadius: '6px',
-            fontSize: '12px',
+            background: "#0f172a",
+            border: "1px solid rgba(255,255,255,0.08)",
+            borderRadius: 8,
+            fontSize: 12,
+            color: "#e2e8f0",
           }}
+          labelStyle={{ color: "#94a3b8" }}
           formatter={(v: number) => [`${(v * 100).toFixed(1)}%`, 'Drop-off Rate']}
-          cursor={{ fill: 'hsl(var(--muted)/0.3)' }}
+          cursor={{ fill: 'rgba(255,255,255,0.05)' }}
         />
         <Bar
           dataKey="drop_off_rate"

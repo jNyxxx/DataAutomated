@@ -53,13 +53,15 @@ export function SentimentTrendChart({ data, height = 200 }: SentimentTrendChartP
           width={40}
         />
         <Tooltip
+          cursor={{ stroke: "#334155", strokeWidth: 1 }}
           contentStyle={{
-            background: 'hsl(var(--card))',
-            border: '1px solid hsl(var(--border))',
-            borderRadius: '6px',
-            fontSize: '12px',
+            background: "#0f172a",
+            border: "1px solid rgba(255,255,255,0.08)",
+            borderRadius: 8,
+            fontSize: 12,
+            color: "#e2e8f0",
           }}
-          labelStyle={{ color: 'hsl(var(--foreground))' }}
+          labelStyle={{ color: "#94a3b8" }}
           formatter={(v: number) => [`${(v * 100).toFixed(1)}%`, 'Sentiment']}
           labelFormatter={(l: string) => format(new Date(l), 'MMM d, yyyy')}
         />

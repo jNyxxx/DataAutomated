@@ -88,12 +88,15 @@ export default async function DashboardPage({ searchParams }: Props) {
   const latestInsight = insightsRes.insights[0];
   const prevInsight = insightsRes.insights[1];
 
+  const formatDate = (dateString?: string | null) => 
+    dateString ? new Date(dateString).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '';
+
   const vocSparkline = insightsRes.insights
-    .map((insight) => insight.sentiment_score ?? 0)
+    .map((insight) => ({ value: insight.sentiment_score ?? 0, label: formatDate(insight.created_at) }))
     .reverse();
 
   const churnSparkline = insightsRes.insights
-    .map((insight) => insight.churn_risk ?? 0)
+    .map((insight) => ({ value: insight.churn_risk ?? 0, label: formatDate(insight.created_at) }))
     .reverse();
 
   // Use the full-range overview velocity (DB-aggregated) rather than grouping the 10-item list
@@ -106,9 +109,9 @@ export default async function DashboardPage({ searchParams }: Props) {
     crit: (journey.drop_off_rate ?? 0) > 0.4,
   }));
   const funnelSparkline = journeysRes.insights
-    .map((journey) => journey.drop_off_rate ?? 0)
+    .map((journey) => ({ value: journey.drop_off_rate ?? 0, label: formatDate(journey.created_at) }))
     .reverse();
-  const agentSparkline = summary?.runs_hourly ?? [];
+  const agentSparkline = (summary?.runs_hourly ?? []).map((val, i) => ({ value: val, label: `Hour ${i+1}` }));
 
   const sentimentDelta =
     summary?.sentiment_score != null && prevInsight?.sentiment_score != null
@@ -170,7 +173,7 @@ export default async function DashboardPage({ searchParams }: Props) {
       value: summary?.unread_signals?.toString() ?? '0',
       delta: criticalCount > 0 ? `${criticalCount} critical` : '0 critical',
       dir: 'down' as const,
-      spark: signalVelocity.map((item) => item.count),
+      spark: signalVelocity.map((item) => ({ value: item.count, label: item.day })),
     },
     {
       label: 'Top Funnel Drop',
@@ -264,7 +267,7 @@ export default async function DashboardPage({ searchParams }: Props) {
               {kpi.dir === 'up' ? '▲' : '▼'} {kpi.delta}
             </div>
             <div className="mt-3">
-              <Sparkline points={kpi.spark} color={TINT[kpi.stream as keyof typeof TINT]} height={36} />
+              <Sparkline data={kpi.spark} color={TINT[kpi.stream as keyof typeof TINT]} height={36} />
             </div>
           </section>
         ))}
@@ -324,7 +327,7 @@ export default async function DashboardPage({ searchParams }: Props) {
             <span className="ml-auto truncate text-xs text-slate-400">Sentiment - 30d</span>
           </div>
           <div className="mt-3 flex-1">
-            <Sparkline points={vocSparkline} color={TINT.voc} height={48} />
+            <Sparkline data={vocSparkline} color={TINT.voc} height={48} />
           </div>
           <p className="mt-3 truncate text-sm text-slate-400">Top theme: <span className="text-slate-200">{topTheme}</span></p>
         </section>

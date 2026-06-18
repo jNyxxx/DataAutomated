@@ -1,82 +1,82 @@
+'use client';
 import React from 'react';
+import { Area, AreaChart, Bar, BarChart, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 
 // Sparkline — stock-chart style with smooth bezier curves and gradient area fill
-export function Sparkline({ points, color, height = 40 }: { points: readonly number[], color: string, height?: number }) {
-  if (!points || points.length === 0) return null;
-
-  const w = 120;
-  const padY = 4;
-
-  if (points.length === 1) {
-    const mid = height / 2;
-    return (
-      <svg viewBox={`0 0 ${w} ${height}`} preserveAspectRatio="none" className="w-full" style={{ height: `${height}px` }}>
-        <line x1="0" y1={mid} x2={w} y2={mid} stroke={color} strokeWidth="1.5" strokeOpacity="0.4" />
-        <circle cx={w} cy={mid} r="2.5" fill={color} />
-      </svg>
-    );
-  }
-
-  const min = Math.min(...points);
-  const max = Math.max(...points);
-  const range = max === min ? 0 : max - min;
-  const X = (i: number) => (i / (points.length - 1)) * w;
-  const Y = (v: number) => {
-    if (range === 0) return height / 2;
-    return height - padY - ((v - min) / range) * (height - padY * 2);
-  };
-
-  const pts = points.map((v, i) => ({ x: X(i), y: Y(v) }));
-
-  // Cubic bezier: control points at the horizontal midpoint keep the curve smooth without overshooting
-  let linePath = `M${pts[0].x.toFixed(1)},${pts[0].y.toFixed(1)}`;
-  for (let i = 1; i < pts.length; i++) {
-    const cpx = ((pts[i - 1].x + pts[i].x) / 2).toFixed(1);
-    linePath += ` C${cpx},${pts[i - 1].y.toFixed(1)} ${cpx},${pts[i].y.toFixed(1)} ${pts[i].x.toFixed(1)},${pts[i].y.toFixed(1)}`;
-  }
-
-  const last = pts[pts.length - 1];
-  const areaPath = `${linePath} L${w},${height} L0,${height} Z`;
-  // Use a safe CSS id from the hex color (strip # and non-alphanum)
+export function Sparkline({ points, data, color, height = 40 }: { points?: number[], data?: { value: number, label: string }[], color: string, height?: number }) {
+  const chartData = data ? data : (points || []).map((v, i) => ({ value: v, label: `Point ${i + 1}` }));
+  if (!chartData || chartData.length === 0) return null;
   const gradId = `sg${color.replace(/[^a-z0-9]/gi, '')}`;
 
   return (
-    <svg viewBox={`0 0 ${w} ${height}`} preserveAspectRatio="none" className="w-full" style={{ height: `${height}px` }}>
-      <defs>
-        <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor={color} stopOpacity="0.38" />
-          <stop offset="75%" stopColor={color} stopOpacity="0.06" />
-          <stop offset="100%" stopColor={color} stopOpacity="0" />
-        </linearGradient>
-      </defs>
-      <path d={areaPath} fill={`url(#${gradId})`} />
-      <path d={linePath} fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-      <circle cx={last.x.toFixed(1)} cy={last.y.toFixed(1)} r="2.5" fill={color} />
-    </svg>
+    <div style={{ height, width: '100%' }}>
+      <ResponsiveContainer width="100%" height="100%">
+        <AreaChart data={chartData} margin={{ top: 4, right: 4, bottom: 0, left: 4 }}>
+          <defs>
+            <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor={color} stopOpacity={0.38} />
+              <stop offset="75%" stopColor={color} stopOpacity={0.06} />
+              <stop offset="100%" stopColor={color} stopOpacity={0} />
+            </linearGradient>
+          </defs>
+          <XAxis dataKey="label" hide />
+          <YAxis domain={['auto', 'auto']} hide />
+          <Tooltip
+            cursor={{ stroke: "#334155", strokeWidth: 1 }}
+            contentStyle={{
+              background: "#0f172a",
+              border: "1px solid rgba(255,255,255,0.08)",
+              borderRadius: 8,
+              fontSize: 12,
+              color: "#e2e8f0",
+            }}
+            labelStyle={{ color: "#94a3b8" }}
+            formatter={(val: number) => [val, 'Value']}
+          />
+          <Area
+            type="monotone"
+            dataKey="value"
+            stroke={color}
+            strokeWidth={1.8}
+            fill={`url(#${gradId})`}
+            dot={false}
+            activeDot={{ r: 3, fill: color, strokeWidth: 0 }}
+          />
+        </AreaChart>
+      </ResponsiveContainer>
+    </div>
   );
 }
 
 // Velocity Bar
-export function Velocity({ data, color }: { data: readonly { day: string, count: number }[], color: string }) {
-  const w = 240, h = 96, pad = 18;
-  const max = Math.max(...data.map(d => d.count), 1) * 1.15;
-  const bw = (w - pad * 2) / Math.max(data.length, 1);
-  
+export function Velocity({ data, color }: { data: { day: string, count: number }[], color: string }) {
+  if (!data || data.length === 0) return null;
   return (
-    <svg viewBox={`0 0 ${w} ${h}`} className="w-full" style={{ height: `${h}px` }}>
-      {data.map((d, i) => {
-        const bh = (d.count / max) * (h - pad * 2);
-        const x = pad + i * bw + bw * 0.18;
-        const y = h - pad - bh;
-        const ww = bw * 0.64;
-        return (
-          <g key={i}>
-            <rect x={x.toFixed(1)} y={y.toFixed(1)} width={ww.toFixed(1)} height={bh.toFixed(1)} rx="3" fill={color} fillOpacity="0.8" />
-            <text x={(x + ww / 2).toFixed(1)} y={h - 5} textAnchor="middle" fill="#94a3b8" fontSize="10">{d.day}</text>
-          </g>
-        );
-      })}
-    </svg>
+    <div style={{ height: 96, width: '100%' }}>
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart data={data} margin={{ top: 4, right: 4, bottom: 0, left: 4 }}>
+          <XAxis dataKey="day" axisLine={false} tickLine={false} tick={{ fill: "#94a3b8", fontSize: 10 }} dy={5} />
+          <YAxis hide />
+          <Tooltip
+            cursor={{ fill: 'rgba(255,255,255,0.05)' }}
+            contentStyle={{
+              background: "#0f172a",
+              border: "1px solid rgba(255,255,255,0.08)",
+              borderRadius: 8,
+              fontSize: 12,
+              color: "#e2e8f0",
+            }}
+            labelStyle={{ color: "#94a3b8" }}
+            formatter={(val: number) => [val, 'Count']}
+          />
+          <Bar dataKey="count" radius={[3, 3, 3, 3]} maxBarSize={48}>
+            {data.map((entry, index) => (
+              <Cell key={`cell-${index}`} fill={color} fillOpacity={0.8} />
+            ))}
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
   );
 }
 
