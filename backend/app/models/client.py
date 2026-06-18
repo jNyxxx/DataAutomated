@@ -16,7 +16,7 @@ from __future__ import annotations
 import uuid
 from typing import Optional
 
-from sqlalchemy import Boolean, ForeignKey, String, Text, text
+from sqlalchemy import Boolean, ForeignKey, String, Text, text, Integer
 from sqlalchemy import TIMESTAMP
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
