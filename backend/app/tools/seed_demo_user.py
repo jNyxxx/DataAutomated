@@ -1,8 +1,12 @@
 """
 seed_demo_user.py — Insert a demo client + admin user for local development.
 
-Usage (from project root, after `docker-compose up -d`):
+Usage:
+    # From the host, after `docker compose up -d`
     python backend/app/tools/seed_demo_user.py
+
+    # From inside the backend container
+    python app/tools/seed_demo_user.py
 
 Credentials created:
     Email    : demo@dataautomated.io
@@ -20,12 +24,17 @@ import asyncpg
 from passlib.context import CryptContext
 
 # ---------------------------------------------------------------------------
-# Config — reads from env just like the app does, but falls back to the
-# host-side DSN (localhost:5433 = Docker-mapped port).
+# Config — prefer explicit seed DSN, then the app's DATABASE_DSN, then fall back
+# to the host-side Docker-mapped port. This makes the script work both:
+#   1. on the host (localhost:5433), and
+#   2. inside `da_backend` (DATABASE_DSN=db:5432 from .env).
 # ---------------------------------------------------------------------------
 DB_DSN = os.environ.get(
     "SEED_DATABASE_DSN",
-    "postgresql://dataautomated:change_me_locally@localhost:5433/dataautomated",
+    os.environ.get(
+        "DATABASE_DSN",
+        "postgresql://dataautomated:change_me_locally@localhost:5433/dataautomated",
+    ),
 )
 
 DEMO_CLIENT_NAME = "DataAutomated Demo"

@@ -17,7 +17,6 @@ import { LiveBadge } from '@/components/ui/LiveBadge';
 import { Badge, BADGE_STYLES, DOT_STYLES } from '@/components/ui/badge';
 import { FunnelChart, Sparkline, Velocity } from '@/components/ui/charts';
 import { Button } from '@/components/ui/button';
-import { LiveRefresh } from '@/components/ui/live-refresh';
 const TINT = { voc: '#2dd4bf', comp: '#f43f5e', jrn: '#3b82f6', system: '#94a3b8' } as const;
 
 type Props = { searchParams: Promise<{ [key: string]: string | string[] | undefined }> };
@@ -228,7 +227,6 @@ export default async function DashboardPage({ searchParams }: Props) {
 
   return (
     <div className="pb-12">
-      <LiveRefresh intervalMs={15000} />
       <Header
         title="Dashboard"
         description={`${clientInfo?.name ?? 'Your account'} - all data live`}

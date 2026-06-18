@@ -42,6 +42,11 @@ python -m pytest -q
 | n8n | http://localhost:5678 | orchestration/delivery (basic auth) |
 | Postgres + pgvector | localhost:5433 | `pgvector/pgvector:pg16`; inside Docker use `db:5432` |
 
+## Handoff
+
+For a management / engineer handoff covering system structure, AWS requirements,
+environment variables, and local verification steps, see [HANDOFF.md](HANDOFF.md).
+
 ## Repository layout
 
 Defined and enforced by [`PROJECT_STRUCTURE.md`](PROJECT_STRUCTURE.md) (reproduces CLAUDE §4). New files go in the matching existing folder; new top-level folders require approval.

@@ -15,6 +15,15 @@ export function InsightStream({ onEvent }: InsightStreamProps) {
 
   const processedEvents = useRef<Set<string>>(new Set());
   const lastEventIdRef = useRef<string | null>(null);
+  const refreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const scheduleRefresh = useCallback((delayMs = 750) => {
+    if (refreshTimeoutRef.current) return;
+    refreshTimeoutRef.current = setTimeout(() => {
+      refreshTimeoutRef.current = null;
+      router.refresh();
+    }, delayMs);
+  }, [router]);
 
   const handleEvent = useCallback(
     (e: MessageEvent<string>) => {
@@ -35,13 +44,12 @@ export function InsightStream({ onEvent }: InsightStreamProps) {
           const typeLabel = { voc: 'VoC', comp_signal: 'Competitive', journey: 'Journey' }[jobType as string] ?? jobType;
           if (data.event_type === 'agent_job.completed') {
             toast(`${typeLabel} analysis complete`, 'success');
-            router.refresh();
+            scheduleRefresh();
           } else if (data.event_type === 'agent_job.failed') {
             toast(`${typeLabel} analysis failed`, 'error');
-            router.refresh();
+            scheduleRefresh();
           } else if (data.event_type === 'agent_job.started') {
             toast(`${typeLabel} analysis started...`, 'info');
-            router.refresh();
           }
           window.dispatchEvent(new CustomEvent('da:job', { detail: data }));
           return;
@@ -52,7 +60,7 @@ export function InsightStream({ onEvent }: InsightStreamProps) {
             toast(`Syncing ${data.payload?.source_type}...`, 'info');
           } else if (data.event_type === 'data_source.sync_completed') {
             toast(`Finished syncing ${data.payload?.source_type}`, 'success');
-            router.refresh();
+            scheduleRefresh();
           } else if (data.event_type === 'data_source.sync_failed') {
             toast(`Failed to sync ${data.payload?.source_type}`, 'error');
           }
@@ -64,18 +72,17 @@ export function InsightStream({ onEvent }: InsightStreamProps) {
             data.event_type === 'feedback_insight.created' ? 'New VoC insight available' :
             data.event_type === 'competitive_signal.created'  ? 'New competitive signal detected' :
             data.event_type === 'journey_insight.created' ? 'Journey data updated' : 
-            data.event_type === 'raw_feedback.created' ? 'New raw feedback received' : 
             data.event_type === 'report.created' ? 'New report generated and ready for download' : null;
           if (label) {
             toast(label, 'success');
-            router.refresh();
+            scheduleRefresh();
           }
         }
       } catch {
         // ignore malformed frames
       }
     },
-    [onEvent, router, toast],
+    [onEvent, scheduleRefresh, toast],
   );
 
   useEffect(() => {
@@ -113,7 +120,7 @@ export function InsightStream({ onEvent }: InsightStreamProps) {
           const data = JSON.parse((e as MessageEvent<string>).data);
           if (data.error === 'queue_full' || data.disconnect || data.resync_required) {
             // State is unreliable — hard-refetch all server components immediately.
-            router.refresh();
+            scheduleRefresh(0);
           }
         } catch { /* ignore malformed frames */ }
       });
@@ -136,8 +143,12 @@ export function InsightStream({ onEvent }: InsightStreamProps) {
     return () => {
       source?.close();
       clearTimeout(reconnectTimeout);
+      if (refreshTimeoutRef.current) {
+        clearTimeout(refreshTimeoutRef.current);
+        refreshTimeoutRef.current = null;
+      }
     };
-  }, [handleEvent]);
+  }, [handleEvent, scheduleRefresh]);
 
   return null;
 }
