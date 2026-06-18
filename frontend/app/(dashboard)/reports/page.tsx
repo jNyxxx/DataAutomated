@@ -252,9 +252,11 @@ function LatestBriefing({ briefing }: { briefing: Briefing | null }) {
                   <Badge variant={highlight.stream} dot className="mt-0.5 shrink-0">
                     {STREAM_LABEL[highlight.stream]}
                   </Badge>
-                  <p className="line-clamp-2 min-w-0 text-sm leading-relaxed text-slate-300">
-                    {highlight.text}
-                  </p>
+                  <div className="flex-1">
+                    <p className="min-w-0 text-sm leading-relaxed text-slate-300">
+                      {highlight.text}
+                    </p>
+                  </div>
                 </li>
               ))}
             </ul>

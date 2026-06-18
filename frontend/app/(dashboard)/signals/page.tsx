@@ -102,16 +102,16 @@ export default async function SignalsPage() {
                   <Badge variant={severityBadges[signal.su]?.[1] || 'neutral'} dot>{severityBadges[signal.su]?.[0] || 'Unknown'}</Badge>
                   <Badge variant="neutral">{signal.cat}</Badge>
                   <span className="ml-auto flex min-w-0 items-center gap-2 text-xs text-slate-400">
-                    <Badge variant="neutral">{signal.src}</Badge>
-                    <span className="truncate">{signal.when}</span>
+                    <Badge variant="neutral" className="max-w-[200px] truncate block md:max-w-xs">{signal.src}</Badge>
+                    <span className="shrink-0">{signal.when}</span>
                   </span>
                 </div>
-                <h3 className="mt-3 line-clamp-2 text-base font-semibold text-white">
+                <h3 className="mt-3 text-base font-semibold text-white">
                   <span className="text-slate-300">{signal.comp}</span> - {signal.title}
                 </h3>
                 <div className="mt-3 rounded-lg bg-slate-900/50 p-3.5">
                   <div className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-blue-400">Strategic context</div>
-                  <p className="line-clamp-3 text-sm font-normal leading-relaxed text-slate-300">{signal.ctx}</p>
+                  <p className="text-sm font-normal leading-relaxed text-slate-300">{signal.ctx}</p>
                 </div>
                 <div className="mt-4 flex flex-wrap gap-2">
                   <MarkReadButton id={signal.id} isRead={signal.isRead} />
@@ -124,7 +124,7 @@ export default async function SignalsPage() {
         <div className="flex flex-col gap-5 xl:col-span-1">
           <section className="rounded-xl bg-slate-800 p-5 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.05)]">
             <div className="mb-2 flex items-center gap-1.5 text-xs font-medium text-blue-400">Strategic context</div>
-            <p className="line-clamp-4 text-sm leading-relaxed text-slate-300">
+            <p className="text-sm leading-relaxed text-slate-300">
               {strategicContextText}
             </p>
             <dl className="mt-3 divide-y divide-white/5">

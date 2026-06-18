@@ -301,7 +301,7 @@ export default async function DashboardPage({ searchParams }: Props) {
                   </div>
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-medium text-slate-100">{item.title}</p>
-                    <p className="line-clamp-1 text-xs text-slate-400">{item.meta.join(' - ')}</p>
+                    <p className="text-xs text-slate-400">{item.meta.join(' - ')}</p>
                   </div>
                   <ArrowRight className="size-4 shrink-0 text-slate-500" />
                 </Link>

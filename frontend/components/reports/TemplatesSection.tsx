@@ -83,7 +83,7 @@ export function TemplatesSection() {
               <span className="truncate">{t.label ?? STREAM_LABEL[t.stream]}</span>
             </Badge>
             <p className="truncate text-sm font-medium text-slate-100">{t.name}</p>
-            <p className="line-clamp-2 text-xs leading-relaxed text-slate-400">{t.desc}</p>
+            <p className="text-xs leading-relaxed text-slate-400">{t.desc}</p>
             <Button
               variant="default"
               size="sm"

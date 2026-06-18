@@ -215,7 +215,9 @@ export default async function InsightsPage() {
                     {s.ingested_at ? new Date(s.ingested_at).toLocaleString() : "—"}
                   </span>
                 </div>
-                <p className="text-sm text-slate-300 line-clamp-3">{s.content}</p>
+                <div className="mt-3 rounded-lg bg-slate-900/50 p-3.5">
+                  <p className="text-sm text-slate-300">{s.content}</p>
+                </div>
               </li>
             ))}
           </ul>
