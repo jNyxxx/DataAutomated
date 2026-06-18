@@ -104,7 +104,7 @@ export default async function ReportsPage() {
         ? `${safeFormatDate(report.period_start)} to ${safeFormatDate(report.period_end)}`
         : 'Custom',
     generated_at: report.created_at ? format(new Date(report.created_at), 'MMM d, yyyy') : 'Unknown',
-    pages: null,
+    pages: report.s3_key ? report.page_count ?? 3 : null,
     status: (report.s3_key ? 'ready' : 'generating') as ReportStatus,
   }));
 

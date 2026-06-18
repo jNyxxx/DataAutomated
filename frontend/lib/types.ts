@@ -141,6 +141,7 @@ export interface Report {
   period_start: string;
   period_end: string;
   created_at: string;
+  page_count: number | null;
 }
 
 export interface ReportsListResponse {

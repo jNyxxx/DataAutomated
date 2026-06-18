@@ -71,15 +71,18 @@ export function Sidebar({ clientName = "Your account", plan = "" }: { clientName
                 const active = pathname.startsWith(it.href);
                 const Icon = it.icon;
                 return (
-                  <li key={it.id}>
+                  <li key={it.id} className="relative">
                     <Link
                       href={it.href}
                       className={cn(
                         "group flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm transition-[transform,colors] duration-200 ease-out active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500",
-                        active ? "bg-slate-800 font-medium text-white" : "text-slate-400 hover:bg-slate-800/50 hover:text-slate-200"
+                        active ? "bg-slate-800/80 font-medium text-white shadow-[inset_0_1px_0_0_rgba(255,255,255,0.05)]" : "text-slate-400 hover:bg-slate-800/50 hover:text-slate-200"
                       )}
                     >
-                      <Icon className={cn("h-5 w-5 shrink-0 transition-colors", active ? "text-white" : "text-slate-500 group-hover:text-slate-300")} strokeWidth={1.75} />
+                      {active && (
+                        <div className="absolute inset-y-1.5 left-0 w-1 rounded-r-full bg-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.6)]" />
+                      )}
+                      <Icon className={cn("h-5 w-5 shrink-0 transition-colors", active ? "text-blue-400" : "text-slate-500 group-hover:text-slate-300")} strokeWidth={1.75} />
                       <span className="flex-1 truncate">{it.label}</span>
                     </Link>
                   </li>

@@ -349,7 +349,7 @@ async def list_reports(current_user: CurrentUser = Depends(get_current_user)):
     """Returns all generated reports for the authenticated client, newest first."""
     async with acquire_for_client(current_user.client_id) as conn:
         rows = await conn.fetch(
-            """SELECT id, report_type, s3_key, period_start, period_end, created_at
+            """SELECT id, report_type, s3_key, period_start, period_end, created_at, page_count
                FROM reports WHERE client_id = $1 ORDER BY created_at DESC LIMIT 50""",
             current_user.client_id,
         )

@@ -131,7 +131,7 @@ export default async function DashboardPage({ searchParams }: Props) {
     .map((insight) => ({
       stream: 'voc',
       su: (insight.churn_risk ?? 0) > 0.25 ? 'critical' : 'high',
-      title: (insight.narrative ?? 'Elevated churn risk detected').slice(0, 100),
+      title: insight.narrative ?? 'Elevated churn risk detected',
       meta: [`Churn: ${Math.round((insight.churn_risk ?? 0) * 100)}%`, insight.sentiment_label ?? ''],
     }));
 
@@ -229,7 +229,7 @@ export default async function DashboardPage({ searchParams }: Props) {
   ]);
 
   return (
-    <div className="pb-12">
+    <div className="pb-12 fade-in-up">
       <Header
         title="Dashboard"
         description={`${clientInfo?.name ?? 'Your account'} - all data live`}
@@ -242,7 +242,7 @@ export default async function DashboardPage({ searchParams }: Props) {
       />
 
       {sourcesRes.sources.length === 0 && (
-        <div className="mt-5 flex flex-wrap items-center justify-between gap-4 rounded-xl border border-blue-500/20 bg-blue-500/10 px-5 py-4">
+        <div className="mt-5 flex flex-wrap items-center justify-between gap-4 rounded-xl border border-blue-500/20 bg-blue-500/10 px-5 py-4 fade-in-up" style={{ animationDelay: '0.1s' }}>
           <div>
             <p className="text-sm font-medium text-blue-300">Your account isn&apos;t set up yet</p>
             <p className="mt-0.5 text-xs text-blue-400/80">
@@ -255,9 +255,9 @@ export default async function DashboardPage({ searchParams }: Props) {
         </div>
       )}
 
-      <div className="mt-5 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
+      <div className="mt-5 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5 fade-in-up" style={{ animationDelay: '0.1s' }}>
         {kpis.map((kpi) => (
-          <section key={kpi.label} className="rounded-xl bg-slate-800 p-4 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.05)]">
+          <section key={kpi.label} className="glass-card rounded-xl p-4">
             <div className="flex items-center gap-2">
               <span className={`size-2 shrink-0 rounded-full ${DOT_STYLES[kpi.stream as keyof typeof DOT_STYLES]}`} />
               <span className="truncate text-xs text-slate-400">{kpi.label}</span>
@@ -273,7 +273,7 @@ export default async function DashboardPage({ searchParams }: Props) {
         ))}
       </div>
 
-      <section className="mt-5 rounded-xl bg-slate-800 p-5 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.05)]">
+      <section className="mt-5 glass-card rounded-xl p-5 fade-in-up" style={{ animationDelay: '0.2s' }}>
         <div className="mb-4 flex items-center justify-between gap-3">
           <div className="min-w-0">
             <h2 className="truncate text-sm font-semibold text-white">Needs attention</h2>
@@ -311,8 +311,8 @@ export default async function DashboardPage({ searchParams }: Props) {
         </ul>
       </section>
 
-      <div className="mt-5 grid grid-cols-1 gap-4 xl:grid-cols-2">
-        <section className="flex flex-col rounded-xl bg-slate-800 p-5 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.05)]">
+      <div className="mt-5 grid grid-cols-1 gap-4 xl:grid-cols-2 fade-in-up" style={{ animationDelay: '0.3s' }}>
+        <section className="glass-card flex flex-col rounded-xl p-5">
           <div className="mb-4 flex items-center justify-between gap-3">
             <Badge variant="voc" dot>Voice of Customer</Badge>
             <Link href="/insights" className="inline-flex items-center gap-1 rounded text-xs font-medium text-slate-400 hover:text-slate-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">Open <ArrowUpRight className="size-3" /></Link>
@@ -332,7 +332,7 @@ export default async function DashboardPage({ searchParams }: Props) {
           <p className="mt-3 truncate text-sm text-slate-400">Top theme: <span className="text-slate-200">{topTheme}</span></p>
         </section>
 
-        <section className="flex flex-col rounded-xl bg-slate-800 p-5 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.05)]">
+        <section className="glass-card flex flex-col rounded-xl p-5">
           <div className="mb-4 flex items-center justify-between gap-3">
             <Badge variant="comp" dot>Competitive</Badge>
             <Link href="/signals" className="inline-flex items-center gap-1 rounded text-xs font-medium text-slate-400 hover:text-slate-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">Open <ArrowUpRight className="size-3" /></Link>
@@ -353,7 +353,7 @@ export default async function DashboardPage({ searchParams }: Props) {
           <p className="mt-3 truncate text-sm text-slate-400">Top competitor: <span className="text-slate-200">{topCompetitor}</span></p>
         </section>
 
-        <section className="rounded-xl bg-slate-800 p-5 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.05)] xl:col-span-2">
+        <section className="glass-card rounded-xl p-5 xl:col-span-2">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <Badge variant="jrn" dot>Journey Intelligence</Badge>
             <p className="truncate text-sm text-slate-400">
@@ -368,8 +368,8 @@ export default async function DashboardPage({ searchParams }: Props) {
         </section>
       </div>
 
-      <div className="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <section className="rounded-xl bg-slate-800 p-5 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.05)]">
+      <div className="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-2 fade-in-up" style={{ animationDelay: '0.4s' }}>
+        <section className="glass-card rounded-xl p-5">
           <div className="mb-3 flex items-center justify-between gap-3">
             <h2 className="truncate text-sm font-semibold text-white">Agent runs</h2>
             <span className="shrink-0 text-xs text-slate-400">last 24h</span>
@@ -394,7 +394,7 @@ export default async function DashboardPage({ searchParams }: Props) {
           </ul>
         </section>
 
-        <section className="rounded-xl bg-slate-800 p-5 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.05)]">
+        <section className="glass-card rounded-xl p-5">
           <div className="mb-3 flex items-center justify-between gap-3">
             <h2 className="truncate text-sm font-semibold text-white">Source health</h2>
             <Button variant="ghost" asChild>

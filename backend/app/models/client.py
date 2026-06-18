@@ -140,3 +140,4 @@ class Report(Base):
     created_at: Mapped[Optional[object]] = mapped_column(
         TIMESTAMP(timezone=True), server_default=text("NOW()"), nullable=True
     )
+    page_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)

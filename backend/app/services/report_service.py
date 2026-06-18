@@ -216,20 +216,22 @@ async def generate_report(
         journeys=[dict(r) for r in journeys],
     )
 
-    pdf_bytes = _html_to_pdf(html)
+    pdf_bytes, page_count = _html_to_pdf(html)
 
-    s3_key = f"{client_id}/{report_type}_{now.strftime('%Y%m%d')}.pdf"
+    short_id = str(report_id).split('-')[0] if report_id else str(uuid.uuid4()).split('-')[0]
+    s3_key = f"{client_id}/{report_type}_{now.strftime('%Y%m%d')}_{short_id}.pdf"
     s3_url = _upload_to_s3(pdf_bytes, s3_key)  # raises on S3 failure
 
     report_id = report_id or str(uuid.uuid4())
     try:
         await conn.execute(
-            """INSERT INTO reports (id, client_id, report_type, s3_key, period_start, period_end, created_at)
-               VALUES ($1, $2, $3, $4, $5, $6, $7)
+            """INSERT INTO reports (id, client_id, report_type, s3_key, period_start, period_end, created_at, page_count)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
                ON CONFLICT (id) DO UPDATE 
                SET s3_key = EXCLUDED.s3_key, 
                    period_start = EXCLUDED.period_start, 
-                   period_end = EXCLUDED.period_end""",
+                   period_end = EXCLUDED.period_end,
+                   page_count = EXCLUDED.page_count""",
             uuid.UUID(report_id),
             uuid.UUID(client_id),
             report_type,
@@ -237,6 +239,7 @@ async def generate_report(
             period_start,
             period_end,
             now,
+            page_count,
         )
         from app.services.realtime_service import publish_event
         await publish_event(uuid.UUID(client_id), "report.created", report_id, {"report_type": report_type, "s3_key": s3_key})
@@ -255,15 +258,16 @@ async def generate_report(
 # PDF + S3 helpers
 # --------------------------------------------------------------------------- #
 
-def _html_to_pdf(html: str) -> bytes:
+def _html_to_pdf(html: str) -> tuple[bytes, int]:
     try:
         from weasyprint import HTML
-        return HTML(string=html).write_pdf()
+        doc = HTML(string=html).render()
+        return doc.write_pdf(), len(doc.pages)
     except (ImportError, OSError) as exc:
         # OSError: WeasyPrint is pip-installed but native libs (pango/harfbuzz)
         # are missing from the host — same degradation path as not installed.
         logger.warning("WeasyPrint unavailable (%s); returning HTML bytes as fallback", exc)
-        return html.encode("utf-8")
+        return html.encode("utf-8"), 1
 
 
 def presign_report_url(key: str | None, expires_in: int = 604800, response_content_disposition: str | None = None) -> str | None:
