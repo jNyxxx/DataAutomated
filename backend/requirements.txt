@@ -44,7 +44,7 @@ openai>=2.42.0,<3.0
 # ---- Phase 6 deps (reports + delivery) ----
 resend>=2.30.1,<3.0                                             # P6: email delivery
 weasyprint>=62.0                                             # P6/P9: PDF generation (requires system libs: pango cairo)
-jinja2>=3.1,<4.0                                             # P6: HTML report templates
+jinja2>=3.1.6,<4.0                                             # P6: HTML report templates
 boto3>=1.34,<2.0                                             # P6/P9: S3 uploads + Secrets Manager
 
 # ---- Observability (P11 — inert without SENTRY_DSN; env-gated at runtime) ----
