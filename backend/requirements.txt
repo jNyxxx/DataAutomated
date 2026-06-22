@@ -35,7 +35,7 @@ pytest-asyncio>=1.4.0,<2.0
 # Pinned to bounded ranges (supply-chain hygiene — no unbounded versions). Ranges include the
 # versions the suite was validated against (langgraph 1.2.4, langchain 1.3.4, langchain-openai
 # 1.2.2, langsmith 0.8.9, openai 2.41.0); revisit bounds in P10 QA.
-langgraph>=1.2,<2.0
+langgraph>=1.2.6,<2.0
 langchain>=1.3,<2.0
 langchain-openai>=1.2,<2.0
 langsmith>=0.8,<1.0
